@@ -2,6 +2,8 @@
 
 **A daily "guess when and where this photo was taken" game, dressed as a newspaper.**
 
+**Play at [theatlasnewspaper.co.uk](https://theatlasnewspaper.co.uk)**
+
 Every day The Atlas prints five historical photographs. For each, you place a pin
 on a world map for *where* it was taken and slide to a year for *when*. The closer
 you are on both, the higher you score - up to 10,000 a round, 50,000 for the day.
