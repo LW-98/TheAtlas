@@ -1,0 +1,2 @@
+# The Lambda runtime already provides boto3, so there are no runtime deps.
+# This file exists so `sam build` has something to install against.

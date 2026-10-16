@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Daily TimeGuess - guess when and where each historical photo was taken. A new 5-photo round every day.">
+<title>The Atlas - Game of Where &amp; When</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,600&family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&family=UnifrakturCook:wght@700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --paper:#e9e5da;--paper-2:#f4f1e8;--paper-3:#efebe0;
+  --ink:#1b1913;--ink-soft:#575344;
+  --line:#c9c2b0;--line-strong:#a39a83;
+  --red:#9e2b25;--sea:#2f5f63;
+  --good:#2f6b4a;--ok:#946f26;--bad:#9a573f;
+  --name:"UnifrakturCook","Fraunces",serif;
+  --serif:"Fraunces",Georgia,"Times New Roman",serif;
+  --body:"PT Serif",Georgia,"Times New Roman",serif;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--body);background:var(--paper);color:var(--ink);line-height:1.6;min-height:100vh;-webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(rgba(27,25,19,.035) 1px,transparent 1.4px);background-size:4px 4px}
+h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.1}
+a{color:var(--red);text-decoration:none}
+::selection{background:rgba(158,43,37,.2);color:var(--ink)}
+.sheet{max-width:880px;min-height:100vh;margin:0 auto;padding:26px 40px 92px;background:var(--paper);border-left:1px solid var(--line-strong);border-right:1px solid var(--line-strong)}
+
+/* Masthead / nameplate */
+.ear{display:flex;justify-content:space-between;align-items:center;font-family:var(--body);font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);padding-bottom:4px}
+.ear-link{background:none;border:none;font-family:var(--body);font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink);cursor:pointer;padding:0;font-weight:700}
+.ear-link:hover{color:var(--red)}
+.restart{display:none;margin-left:14px;color:var(--red)}
+.nameplate{text-align:center;font-family:var(--name);font-weight:700;font-size:clamp(3rem,13vw,5.4rem);line-height:1.02;color:var(--ink);margin:2px 0 2px}
+.motto{text-align:center;font-family:var(--body);font-style:italic;font-size:.82rem;letter-spacing:.04em;color:var(--ink-soft);margin-bottom:6px}
+.scotch{height:3px;border-top:3px solid var(--ink);border-bottom:1px solid var(--ink);margin:7px 0}
+.folio{display:flex;justify-content:space-between;align-items:center;gap:12px;font-family:var(--body);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);padding:4px 0}
+.folio .center{flex:1;text-align:center;color:var(--ink-soft)}
+.folio .side{white-space:nowrap;font-weight:700}
+
+/* Lede */
+.lede{text-align:center;padding:16px 6px 14px}
+.overline{font-family:var(--body);font-weight:700;font-size:.62rem;letter-spacing:.26em;text-transform:uppercase;color:var(--red);margin-bottom:7px}
+.headline{font-family:var(--serif);font-style:italic;font-weight:600;font-size:clamp(1.5rem,5.4vw,2.1rem);color:var(--ink);line-height:1.12}
+.subhead{font-family:var(--body);font-style:italic;font-size:.9rem;color:var(--ink-soft);margin-top:9px;max-width:38ch;margin-left:auto;margin-right:auto}
+.rule-thin{height:1px;background:var(--line-strong);margin:4px 0 16px}
+
+/* Status bar + progress */
+.statusbar{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--body);text-transform:uppercase;letter-spacing:.1em;font-size:.68rem;color:var(--ink-soft);border-bottom:1px solid var(--line);padding-bottom:7px}
+.plate{font-weight:700;color:var(--ink)}
+.score-chip{display:flex;gap:7px;align-items:baseline;font-weight:700;color:var(--ink)}
+.score-chip span{font-weight:400;color:var(--ink-soft)}
+.pips{display:flex;gap:4px;margin:8px 0 20px}
+.pip{flex:1;height:3px;background:var(--line-strong);transition:background .3s}
+.pip.done{background:var(--red)}
+.pip.current{background:var(--ink)}
+
+/* Each round is its own newspaper article */
+.article-head{margin-bottom:12px}
+.article-kicker{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-family:var(--body);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+.article-kicker .plate{font-weight:700;color:var(--ink)}
+.article-kicker .byline{font-style:italic;text-transform:none;letter-spacing:.02em;font-size:.8rem}
+.article-title{font-family:var(--serif);font-weight:600;font-size:clamp(1.4rem,4.4vw,2rem);line-height:1.14;color:var(--ink);margin-top:7px}
+.final .overline{margin-bottom:8px}
+.final-standfirst{font-family:var(--body);font-style:italic;font-size:.9rem;color:var(--ink-soft);margin-top:4px}
+
+/* Section boxes */
+.panel{border:1px solid var(--ink);background:var(--paper-2);padding:15px;margin-bottom:18px}
+.panel-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:13px;gap:12px}
+.panel-title{font-family:var(--serif);font-weight:700;font-size:1rem;text-transform:uppercase;letter-spacing:.09em;color:var(--ink)}
+.panel-note{font-family:var(--body);font-style:italic;font-size:.78rem;color:var(--ink-soft);text-align:right}
+
+/* Photo plate */
+.plate-frame{margin-bottom:18px}
+.photo-wrap{position:relative;overflow:hidden;background:#17140e;border:1px solid var(--ink);aspect-ratio:3/2;display:flex;align-items:center;justify-content:center;touch-action:none;cursor:default;user-select:none;-webkit-user-select:none}
+.photo-wrap.zoomed{cursor:grab}
+.photo-wrap.grabbing{cursor:grabbing}
+.photo-wrap img{width:100%;height:100%;object-fit:contain;display:block;transform-origin:0 0;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;-moz-user-select:none;pointer-events:none}
+.photo-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#cfc6b4;font-family:var(--body);font-style:italic;font-size:.82rem;letter-spacing:.04em}
+.cutline{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;font-family:var(--body);font-style:italic;font-size:.79rem;color:var(--ink-soft);border-top:1px solid var(--line);padding-top:8px;margin-top:8px;line-height:1.45}
+.cutline b{font-style:normal;font-weight:700;text-transform:uppercase;font-size:.66rem;letter-spacing:.08em;color:var(--ink)}
+.zoom-hint{font-style:italic;font-size:.72rem;color:var(--ink-soft);white-space:nowrap}
+
+/* Map */
+.map{height:360px;border:1px solid var(--ink);background:var(--paper)}
+.leaflet-container{background:#d9cfb9;font-family:var(--body)}
+
+/* Year ruler */
+.year-val{font-family:var(--serif);font-size:1.9rem;font-weight:700;color:var(--ink);line-height:1}
+/* The year ruler is the focus of this box, so its header rule is kept light. */
+.panel-year .panel-head{border-bottom:1px solid var(--line);padding-bottom:7px;margin-bottom:6px}
+.ruler{position:relative;margin:24px 3px 4px}
+/* Ticks hang below the track line (never cross above it). */
+.ruler-ticks{position:absolute;left:0;right:0;top:50%;height:9px;pointer-events:none;
+  background-image:repeating-linear-gradient(90deg,var(--line-strong) 0 1.5px,transparent 1.5px,transparent 10%)}
+input[type=range]{position:relative;-webkit-appearance:none;appearance:none;width:100%;height:26px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:2px;background:var(--ink)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:8px;height:24px;margin-top:-11px;background:var(--red);border:1px solid var(--paper-2);border-radius:0;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+input[type=range]::-moz-range-track{height:2px;background:var(--ink)}
+input[type=range]::-moz-range-thumb{width:8px;height:24px;background:var(--red);border:1px solid var(--paper-2);border-radius:0}
+input[type=range]:disabled{opacity:.55}
+.year-scale{display:flex;justify-content:space-between;font-family:var(--body);font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);margin-top:8px}
+
+/* Buttons */
+.btn{display:block;width:100%;background:var(--ink);color:var(--paper-2);border:none;border-radius:0;padding:14px 22px;font-family:var(--body);font-weight:700;font-size:.8rem;text-transform:uppercase;letter-spacing:.15em;cursor:pointer;transition:background .18s,transform .08s;margin-top:15px}
+.btn:hover:not(:disabled){background:var(--red)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{background:var(--line-strong);color:var(--paper-2);cursor:not-allowed}
+.btn.ghost{background:transparent;border:1px solid var(--ink);color:var(--ink)}
+.btn.ghost:hover:not(:disabled){background:var(--ink);color:var(--paper-2)}
+.btn-action{margin-top:2px;padding:17px 22px;font-size:.82rem}
+
+/* Round result */
+.round-result{animation:rise .3s ease}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.rr-scores{display:grid;grid-template-columns:1fr 1fr 1fr;margin-bottom:16px}
+.rr-item{text-align:center;padding:6px}
+.rr-item+.rr-item{border-left:1px solid var(--line)}
+.rr-num{font-family:var(--serif);font-size:1.95rem;line-height:1;font-weight:700;color:var(--ink)}
+.rr-num.good{color:var(--good)}.rr-num.ok{color:var(--ok)}.rr-num.bad{color:var(--bad)}
+.rr-lbl{font-family:var(--body);font-size:.6rem;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-soft);margin-top:7px}
+.rr-detail{text-align:center;font-size:1rem;color:var(--ink);margin-bottom:14px;line-height:1.6}
+.rr-detail b{font-weight:700}
+.attribution{font-family:var(--body);font-size:.73rem;color:var(--ink-soft);text-align:center;line-height:1.7;border-top:1px solid var(--line);padding-top:12px}
+.attribution .ph-title{display:inline-block;font-style:italic;font-weight:700;color:var(--ink);margin-bottom:3px}
+.attribution a{color:var(--red);text-decoration:underline;text-underline-offset:2px}
+
+/* Final edition */
+.final{position:relative;text-align:center;animation:rise .35s ease}
+.final h2{font-family:var(--serif);font-size:1.8rem;font-weight:700;font-style:italic;color:var(--ink);margin:0 auto 4px;display:inline-block;border-bottom:3px double var(--ink);padding-bottom:8px}
+.final-total{font-family:var(--serif);font-size:4rem;font-weight:700;line-height:1;color:var(--ink);margin:12px 0 2px}
+.final-total small{display:block;font-family:var(--body);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);margin-top:8px;font-weight:700}
+.final-grid{display:flex;justify-content:center;gap:16px;margin:20px 0}
+.fg-round{display:flex;flex-direction:column;gap:5px}
+.fg-cats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.fg-cats span{text-align:center;font-family:var(--body);font-size:.56rem;font-weight:700;letter-spacing:.08em;color:var(--ink-soft)}
+.fg-sq{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:1.2rem;line-height:1}
+.fg-sq span{text-align:center}
+.fg-lbl{text-align:center;font-family:var(--body);font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);font-weight:700}
+.final-sep{margin:22px 0 4px}
+.btn.primary{background:var(--red)}
+.btn.primary:hover:not(:disabled){background:#7f211c}
+.dispatch+.dispatch{margin-top:30px;padding-top:30px;border-top:3px double var(--ink)}
+.streak-row{display:flex;justify-content:center;gap:14px;margin:20px 0}
+.streak-item{text-align:center;background:var(--paper);border:1px solid var(--ink);padding:14px 22px;min-width:100px}
+.streak-num{font-family:var(--serif);font-size:2rem;font-weight:700;line-height:1;color:var(--ink)}
+.streak-lbl{font-family:var(--body);font-size:.58rem;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-soft);margin-top:6px}
+.stats{margin-top:22px;text-align:left}
+.stats h3{font-family:var(--body);font-size:.64rem;text-transform:uppercase;letter-spacing:.14em;color:var(--ink-soft);text-align:center;margin-bottom:14px;font-weight:700}
+.dist-row{display:grid;grid-template-columns:64px 1fr;gap:10px;align-items:center;margin-bottom:6px}
+.dist-lbl{font-family:var(--body);font-size:.66rem;color:var(--ink-soft);text-align:right}
+.dist-bar-wrap{background:var(--paper);border:1px solid var(--line);overflow:hidden}
+.dist-bar{background:var(--ink);color:var(--paper-2);font-family:var(--body);font-size:.64rem;font-weight:700;text-align:right;padding:4px 8px;min-width:22px;transition:width .6s cubic-bezier(.2,.8,.2,1)}
+.dist-bar.mine{background:var(--red)}
+
+/* Standings modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(27,24,16,.58);z-index:3000;align-items:center;justify-content:center;animation:fade .2s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.modal-overlay.open{display:flex}
+.modal{position:relative;background:var(--paper-2);border:1px solid var(--ink);border-radius:0;padding:28px 24px;max-width:440px;width:92%;max-height:84vh;overflow-y:auto;animation:rise .28s ease}
+.modal h2{font-family:var(--serif);font-size:1.5rem;font-weight:700;font-style:italic;text-align:center;margin-bottom:4px}
+.modal .modal-sub{text-align:center;font-family:var(--body);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);border-bottom:2px solid var(--ink);padding-bottom:12px;margin-bottom:16px}
+.modal-close{position:absolute;top:12px;right:16px;background:none;border:none;color:var(--ink-soft);font-size:1.6rem;cursor:pointer;line-height:1}
+.modal-close:hover{color:var(--ink)}
+.lb-name-input{background:var(--paper);border:1px solid var(--line-strong);border-radius:0;padding:12px 14px;color:var(--ink);font-family:var(--body);font-size:.86rem;width:100%;margin-bottom:16px}
+.lb-name-input:focus{outline:none;border-color:var(--ink)}
+.lb-table{width:100%;border-collapse:collapse;font-family:var(--body);font-size:.9rem}
+.lb-table th{color:var(--ink-soft);text-transform:uppercase;font-size:.56rem;letter-spacing:.12em;padding:9px 6px;border-bottom:1px solid var(--line-strong);text-align:left;font-weight:700}
+.lb-table td{padding:11px 6px;border-bottom:1px solid var(--line);color:var(--ink)}
+.lb-rank{font-family:var(--serif);color:var(--red);font-weight:700}
+.lb-table tr.lb-me{background:rgba(158,43,37,.09)}
+.final-note{font-family:var(--body);font-style:italic;font-size:.86rem;color:var(--ink-soft);text-align:center;margin:16px 4px}
+.final-warn{font-family:var(--body);font-style:italic;font-size:.84rem;color:var(--red);text-align:center;margin:8px 4px 0}
+.team-form{display:flex;gap:8px;margin:18px 0 4px}
+.team-form .lb-name-input{margin-bottom:0}
+.team-form .btn{margin-top:0;width:auto;white-space:nowrap;padding:12px 20px}
+.linklike{background:none;border:none;color:var(--red);font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}
+
+/* Pins */
+.pin{width:24px;height:24px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid var(--paper-2);box-shadow:0 2px 6px rgba(0,0,0,.45)}
+.pin-guess{background:var(--red)}
+.pin-answer{background:var(--sea)}
+
+/* Toast + colophon */
+.colophon{margin-top:34px;border-top:3px double var(--ink);padding-top:12px;text-align:center;font-family:var(--body);font-size:.68rem;color:var(--ink-soft);line-height:1.8}
+.colophon a{color:var(--ink-soft);text-decoration:underline;text-underline-offset:2px}
+.colophon a:hover{color:var(--red)}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--paper-2);font-family:var(--body);font-weight:700;font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;padding:12px 20px;border-radius:0;opacity:0;transition:all .3s;z-index:5000;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+@media(max-width:520px){
+  .sheet{padding:20px 16px 80px;border-left:none;border-right:none}
+  .map{height:244px}
+  .final-total{font-size:3rem}
+  .folio{font-size:.58rem;letter-spacing:.05em}
+  .folio .side{font-size:.56rem}
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header class="masthead">
+    <div class="ear"><span class="ear-left">Price: Free<button class="ear-link restart" id="restartBtn" title="Clear today's progress (testing)">&#8635; Restart</button></span><button class="ear-link" id="lbBtn">Past Editions &#9671;</button></div>
+    <h1 class="nameplate">The Atlas</h1>
+    <p class="motto">A Daily Reckoning of Where &amp; When</p>
+    <div class="scotch"></div>
+    <div class="folio">
+      <span class="side" id="folioVol">Est. -</span>
+      <span class="center" id="puzzleDate">Loading&hellip;</span>
+      <span class="side" id="folioNo">No. -</span>
+    </div>
+    <div class="scotch"></div>
+  </header>
+
+  <div class="lede">
+    <div class="overline">Today's Edition</div>
+    <div class="headline">Pin the place, name the year.</div>
+    <p class="subhead">Five photographs from the archive. For each, guess where on earth it was taken - and when.</p>
+  </div>
+  <div class="rule-thin"></div>
+
+  <!-- Active game: dispatches stack down the page like a newspaper -->
+  <div id="dispatches"></div>
+
+  <!-- Final edition -->
+  <div id="finalScreen" style="display:none"></div>
+
+  <!-- One round ("dispatch"), cloned per round -->
+  <template id="roundTpl">
+    <article class="dispatch">
+      <header class="article-head">
+        <div class="article-kicker">
+          <span class="plate"></span>
+          <span class="byline"></span>
+        </div>
+        <h2 class="article-title"></h2>
+      </header>
+      <div class="pips"></div>
+
+      <figure class="plate-frame">
+        <div class="photo-wrap">
+          <div class="photo-loading">Developing&hellip;</div>
+          <img class="photo" alt="Mystery historical photograph" draggable="false" style="display:none">
+        </div>
+        <figcaption class="cutline">
+          <span><b>Fig.</b> Our mystery photograph - identify the place and the year it was taken.</span>
+          <span class="zoom-hint">Scroll to zoom &middot; drag to pan</span>
+        </figcaption>
+      </figure>
+
+      <section class="panel">
+        <div class="panel-head">
+          <span class="panel-title">Where on Earth</span>
+          <span class="panel-note map-hint">Click the map to drop your pin</span>
+        </div>
+        <div class="map"></div>
+      </section>
+
+      <section class="panel panel-year">
+        <div class="panel-head">
+          <span class="panel-title">In What Year</span>
+          <span class="year-val">1950</span>
+        </div>
+        <div class="ruler">
+          <div class="ruler-ticks" aria-hidden="true"></div>
+          <input type="range" class="year-slider" min="1850" max="2026" value="1950" step="1">
+        </div>
+        <div class="year-scale"><span>1850</span><span class="year-max">2026</span></div>
+      </section>
+
+      <button class="btn btn-action guess-btn" disabled>Drop a pin to guess</button>
+
+      <div class="round-result" style="display:none">
+        <section class="panel">
+          <div class="panel-head"><span class="panel-title">The Verdict</span><span class="score-chip"><span>Tally</span>0</span></div>
+          <div class="rr-scores">
+            <div class="rr-item"><div class="rr-num rr-loc">0</div><div class="rr-lbl">Location</div></div>
+            <div class="rr-item"><div class="rr-num rr-year">0</div><div class="rr-lbl">Year</div></div>
+            <div class="rr-item"><div class="rr-num rr-total">0</div><div class="rr-lbl">Round</div></div>
+          </div>
+          <p class="rr-detail"></p>
+          <div class="attribution"></div>
+          <button class="btn next-btn">Next round</button>
+        </section>
+      </div>
+    </article>
+  </template>
+
+  <!-- Standings -->
+  <div class="modal-overlay" id="lbModal">
+    <div class="modal">
+      <button class="modal-close" id="lbClose">&times;</button>
+      <h2>Past Editions</h2>
+      <div class="modal-sub">Your team's ten best editions</div>
+      <input class="lb-name-input" id="lbNameInput" placeholder="Your team name (saves your scores)&hellip;" maxlength="30">
+      <table class="lb-table">
+        <thead><tr><th>#</th><th>Score</th><th>Edition</th><th>Date</th></tr></thead>
+        <tbody id="lbBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="colophon">
+    Printed daily from the archives of <a href="https://commons.wikimedia.org" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.<br>
+    Composed with AWS Lambda, API Gateway &amp; DynamoDB &middot;
+    <a href="https://github.com/LW-98" target="_blank" rel="noopener noreferrer">by Liam Wilcox</a>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+// ---- Config ---------------------------------------------------------------
+const API_BASE = "https://REPLACE_WITH_YOUR_API_ID.execute-api.eu-west-2.amazonaws.com";
+const MAX_LOCATION_SCORE = 5000, MAX_YEAR_SCORE = 5000;
+const LOCATION_SCALE_KM = 1000, YEAR_SCALE = 15;
+const CURRENT_YEAR = new Date().getFullYear();
+// The folio's "No." counts up one per day from here. Set this to your launch day.
+const LAUNCH_DATE = "2026-10-16";
+
+// Testing: ?test=1 reveals a date override via ?date=YYYY-MM-DD
+const params = new URLSearchParams(location.search);
+const TEST_MODE = params.get("test") === "1";
+const TEST_DATE = TEST_MODE ? params.get("date") : null;
+
+// Offline mock on the bundled sample - runs in the IDE preview or from file://.
+// On automatically when local; force with ?mock=1/0.
+const IS_LOCAL = (()=>{
+  const h = location.hostname;
+  return location.protocol==="file:"||h===""||h==="localhost"||h==="127.0.0.1"||h.endsWith(".local")||/vscode|webview/i.test(location.href);
+})();
+const MOCK_MODE = (()=>{
+  const q = params.get("mock");
+  if(q==="1") return true;
+  if(q==="0") return false;
+  return IS_LOCAL;
+})();
+
+// Bundled sample puzzle (mirrors src/handlers/sample_puzzle.json) for mock mode.
+const MOCK_PUZZLE = {
+  puzzleId: "sample",
+  rounds: [
+    {imageUrl:"https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/D66_in_Krasnapolsky%2C_overzichten%2C_Bestanddeelnr_920-0804.jpg/1280px-D66_in_Krasnapolsky%2C_overzichten%2C_Bestanddeelnr_920-0804.jpg",year:1967,lat:52.3731,lon:4.8925,place:"Amsterdam",title:"D66 in Krasnapolsky, 1967",description:"D66 party meeting at Krasnapolsky, Amsterdam.",author:"Ron Kroon / Anefo",license:"CC0",licenseUrl:"http://creativecommons.org/publicdomain/zero/1.0/deed.en",sourceUrl:"https://commons.wikimedia.org/wiki/File:D66_in_Krasnapolsky,_overzichten,_Bestanddeelnr_920-0804.jpg"},
+    {imageUrl:"https://upload.wikimedia.org/wikipedia/commons/8/8f/Shedd_aquarium_fg05.jpg",year:2000,lat:41.8756,lon:-87.6244,place:"Chicago",title:"Shedd Aquarium",description:"Shedd Aquarium, Chicago, Illinois, USA.",author:"Fritz Geller-Grimm",license:"CC BY-SA 2.5",licenseUrl:"https://creativecommons.org/licenses/by-sa/2.5",sourceUrl:"https://commons.wikimedia.org/wiki/File:Shedd_aquarium_fg05.jpg"},
+    {imageUrl:"https://upload.wikimedia.org/wikipedia/commons/4/42/John_Diefenbaker_at_opening_of_Hockey_Hall_of_Fame_%2850540776037%29.jpg",year:1961,lat:43.6535,lon:-79.3839,place:"Toronto",title:"Hockey Hall of Fame opening, 1961",description:"John Diefenbaker at the opening of the Hockey Hall of Fame, CNE, Toronto.",author:"Alexandra Studio",license:"CC BY 2.0",licenseUrl:"https://creativecommons.org/licenses/by/2.0",sourceUrl:"https://commons.wikimedia.org/wiki/File:John_Diefenbaker_at_opening_of_Hockey_Hall_of_Fame_(50540776037).jpg"},
+    {imageUrl:"https://upload.wikimedia.org/wikipedia/commons/thumb/2/2d/Berlin-120-Dahlem-Dorf-S-Bahnhof-1993-gje.jpg/1280px-Berlin-120-Dahlem-Dorf-S-Bahnhof-1993-gje.jpg",year:1993,lat:52.5174,lon:13.3951,place:"Berlin",title:"Dahlem-Dorf S-Bahnhof, 1993",description:"Dahlem-Dorf S-Bahn station, Berlin.",author:"Gerd Eichmann",license:"CC BY-SA 4.0",licenseUrl:"https://creativecommons.org/licenses/by-sa/4.0",sourceUrl:"https://commons.wikimedia.org/wiki/File:Berlin-120-Dahlem-Dorf-S-Bahnhof-1993-gje.jpg"},
+    {imageUrl:"https://upload.wikimedia.org/wikipedia/commons/thumb/7/7c/Glandore_avenue%2C_Dublin.jpg/1280px-Glandore_avenue%2C_Dublin.jpg",year:2001,lat:53.3494,lon:-6.2606,place:"Dublin",title:"Glandore Avenue, Dublin",description:"Glandore Avenue, Dublin.",author:"Maksym Kozlenko",license:"CC BY-SA 4.0",licenseUrl:"https://creativecommons.org/licenses/by-sa/4.0",sourceUrl:"https://commons.wikimedia.org/wiki/File:Glandore_avenue,_Dublin.jpg"},
+  ],
+};
+
+// ---- Shared helpers -------------------------------------------------------
+function haversineKm(lat1,lon1,lat2,lon2){
+  const R=6371,rad=d=>d*Math.PI/180;
+  const dphi=rad(lat2-lat1),dl=rad(lon2-lon1);
+  const h=Math.sin(dphi/2)**2+Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dl/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+function scoreLocation(km){return Math.round(MAX_LOCATION_SCORE*Math.exp(-km/LOCATION_SCALE_KM))}
+function scoreYear(off){return Math.round(MAX_YEAR_SCORE*Math.exp(-Math.abs(off)/YEAR_SCALE))}
+function prettyDate(iso){
+  if(!iso||iso==="sample") return "Sample";
+  const d=new Date(iso+"T00:00:00");
+  return d.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+}
+function genId(){return crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`}
+function romanize(n){const m=[[1000,"M"],[900,"CM"],[500,"D"],[400,"CD"],[100,"C"],[90,"XC"],[50,"L"],[40,"XL"],[10,"X"],[9,"IX"],[5,"V"],[4,"IV"],[1,"I"]];let r="";for(const[v,s]of m){while(n>=v){r+=s;n-=v;}}return r;}
+// Folio: Est. = the launch year (Roman numerals); No. = issue number, +1 each
+// day from LAUNCH_DATE, so it doubles as the paper's age.
+function editionNo(d){return Math.max(1,Math.floor((d-new Date(LAUNCH_DATE+"T00:00:00"))/86400000)+1);}
+function setFolio(d){
+  el("folioVol").textContent="Est. "+romanize(new Date(LAUNCH_DATE+"T00:00:00").getFullYear());
+  el("folioNo").textContent="No. "+editionNo(d).toLocaleString();
+}
+function ls(k,v){if(v===undefined){try{return JSON.parse(localStorage.getItem(k))}catch{return null}}localStorage.setItem(k,JSON.stringify(v))}
+function getPlayerId(){let id=ls("dailytimeguess:playerId");if(!id){id=genId();ls("dailytimeguess:playerId",id)}return id}
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200)}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+
+// ---- API (real + mock) ----------------------------------------------------
+async function mockApi(path,opts){
+  await new Promise(r=>setTimeout(r,120));
+  const method=((opts&&opts.method)||"GET").toUpperCase();
+  const body=opts&&opts.body?JSON.parse(opts.body):{};
+  const clean=path.split("?")[0];
+  const P=MOCK_PUZZLE;
+  if(clean==="/api/puzzle/today")
+    return {puzzleId:P.puzzleId,rounds:P.rounds.map((r,i)=>({round:i,imageUrl:r.imageUrl})),roundCount:P.rounds.length,maxRoundScore:10000,maxGameScore:P.rounds.length*10000};
+  if(clean==="/api/guess"){
+    const a=P.rounds[body.round];
+    const km=haversineKm(body.lat,body.lng,a.lat,a.lon);
+    const loc=scoreLocation(km),yr=scoreYear(body.year-a.year);
+    return {round:body.round,locationScore:loc,yearScore:yr,roundScore:loc+yr,distanceKm:Math.round(km*10)/10,yearsOff:body.year-a.year,answer:a};
+  }
+  if(clean==="/api/scores"&&method==="POST"){
+    const hist=ls("dailytimeguess:history")||[];
+    if(hist.some(h=>h.team===body.team&&h.puzzleId===body.puzzleId)){
+      const err=new Error("This team has already filed today's edition.");err.status=409;throw err;
+    }
+    hist.push({team:body.team,score:body.score,puzzleId:body.puzzleId});
+    ls("dailytimeguess:history",hist);
+    return {success:true};
+  }
+  if(clean.startsWith("/api/scores/team/")){
+    const t=decodeURIComponent(clean.slice("/api/scores/team/".length));
+    const games=(ls("dailytimeguess:history")||[]).filter(h=>h.team===t).map(h=>({score:h.score,puzzleId:h.puzzleId})).sort((a,b)=>b.score-a.score);
+    return {team:t,count:games.length,best:games[0]?games[0].score:0,games};
+  }
+  throw new Error("Mock: unhandled "+clean);
+}
+async function api(path,opts){
+  if(MOCK_MODE)return mockApi(path,opts);
+  let url=API_BASE+path;
+  if(TEST_MODE&&TEST_DATE)url+=(path.includes("?")?"&":"?")+"date="+TEST_DATE;
+  const r=await fetch(url,opts);
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){const err=new Error(d.error||`Request failed (${r.status})`);err.status=r.status;throw err;}
+  return d;
+}
+
+// ---- Game state -----------------------------------------------------------
+const game={puzzleId:null,rounds:[],idx:0,total:0,results:[],status:"loading",maxGameScore:50000,id:null};
+const blocks=[];
+const FINAL_TEST=params.get("final")==="1";  // ?final=1 jumps straight to the results page
+// Each round is written up as its own article.
+const ARTICLE_TITLES=["A Moment, Misplaced in Time","Dateline Unknown","Somewhere, Once Upon a Year","The Case of the Wandering Lens","An Hour Lost to History","A Picture Without a Place"];
+const ARTICLE_BYLINES=["By our Roving Correspondent","From the Picture Desk","Filed from parts unknown","Wired overnight","From the Morgue Files","Special to The Atlas"];
+const guessIcon=L.divIcon({className:"",html:'<div class="pin pin-guess"></div>',iconSize:[24,24],iconAnchor:[12,24]});
+const answerIcon=L.divIcon({className:"",html:'<div class="pin pin-answer"></div>',iconSize:[24,24],iconAnchor:[12,24]});
+
+const el=id=>document.getElementById(id);
+
+function saveKey(){return `dailytimeguess:${game.puzzleId}`}
+function loadSaved(){return ls(saveKey())}
+function saveState(){ls(saveKey(),{idx:game.idx,total:game.total,results:game.results,status:game.status,id:game.id})}
+function scoreClass(s){return s>=4000?"good":s>=2000?"ok":"bad"}
+
+function addTiles(m){
+  // Deployed: detailed OpenStreetMap (needs a real origin so a Referer is sent).
+  // Local/file://: Esri's keyless World Street Map, which serves tiles offline.
+  if(IS_LOCAL){
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",{attribution:'Tiles &copy; Esri',maxZoom:18}).addTo(m);
+  }else{
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:'&copy; OpenStreetMap contributors',maxZoom:19}).addTo(m);
+  }
+}
+
+// ---- Photo pan & zoom (TimeGuessr-style; one instance per dispatch) --------
+function setupPanZoom(wrap,img){
+  const z={scale:1,tx:0,ty:0,pointers:new Map(),lastDist:0};
+  const live=()=>img.style.display!=="none";
+  const apply=()=>{img.style.transform=`translate(${z.tx}px,${z.ty}px) scale(${z.scale})`;};
+  const clamp=()=>{const w=wrap.clientWidth,h=wrap.clientHeight;if(z.scale<=1){z.scale=1;z.tx=0;z.ty=0;return;}z.tx=Math.min(0,Math.max(w*(1-z.scale),z.tx));z.ty=Math.min(0,Math.max(h*(1-z.scale),z.ty));};
+  const zoomAt=(px,py,f)=>{const ns=Math.min(6,Math.max(1,z.scale*f));const ix=(px-z.tx)/z.scale,iy=(py-z.ty)/z.scale;z.tx=px-ix*ns;z.ty=py-iy*ns;z.scale=ns;clamp();apply();wrap.classList.toggle("zoomed",z.scale>1);};
+  wrap.addEventListener("dragstart",e=>e.preventDefault());
+  wrap.addEventListener("wheel",e=>{if(!live())return;e.preventDefault();const r=wrap.getBoundingClientRect();zoomAt(e.clientX-r.left,e.clientY-r.top,e.deltaY<0?1.15:1/1.15);},{passive:false});
+  wrap.addEventListener("dblclick",e=>{e.preventDefault();z.scale=1;z.tx=0;z.ty=0;apply();wrap.classList.remove("zoomed","grabbing");});
+  wrap.addEventListener("pointerdown",e=>{if(!live())return;e.preventDefault();wrap.setPointerCapture(e.pointerId);z.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(z.scale>1)wrap.classList.add("grabbing");});
+  wrap.addEventListener("pointermove",e=>{if(!z.pointers.has(e.pointerId))return;const prev=z.pointers.get(e.pointerId);const dx=e.clientX-prev.x,dy=e.clientY-prev.y;z.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(z.pointers.size===1){if(z.scale>1){z.tx+=dx;z.ty+=dy;clamp();apply();}}else if(z.pointers.size===2){const pts=[...z.pointers.values()];const dist=Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y);if(z.lastDist){const r=wrap.getBoundingClientRect();zoomAt((pts[0].x+pts[1].x)/2-r.left,(pts[0].y+pts[1].y)/2-r.top,dist/z.lastDist);}z.lastDist=dist;}});
+  const up=e=>{z.pointers.delete(e.pointerId);z.lastDist=0;if(z.pointers.size===0)wrap.classList.remove("grabbing");};
+  wrap.addEventListener("pointerup",up);
+  wrap.addEventListener("pointercancel",up);
+}
+
+function renderPips(container,current){
+  container.innerHTML="";
+  for(let i=0;i<game.rounds.length;i++){
+    const p=document.createElement("div");
+    p.className="pip"+(i<current?" done":i===current?" current":"");
+    container.appendChild(p);
+  }
+}
+
+// Build one dispatch (a full round block) and append it to the page.
+function buildRound(index){
+  const node=el("roundTpl").content.firstElementChild.cloneNode(true);
+  el("dispatches").appendChild(node);
+  const q=s=>node.querySelector(s);
+
+  q(".plate").textContent=`Article No. ${romanize(index+1)}`;
+  q(".byline").textContent=ARTICLE_BYLINES[index%ARTICLE_BYLINES.length];
+  q(".article-title").textContent=ARTICLE_TITLES[index%ARTICLE_TITLES.length];
+  renderPips(q(".pips"),index);
+
+  const img=q(".photo"),loading=q(".photo-loading"),wrap=q(".photo-wrap");
+  img.onload=()=>{loading.style.display="none";img.style.display="";};
+  img.onerror=()=>{loading.textContent="Image unavailable";};
+  img.src=game.rounds[index].imageUrl;
+  setupPanZoom(wrap,img);
+
+  const slider=q(".year-slider"),yearVal=q(".year-val");
+  slider.max=CURRENT_YEAR;q(".year-max").textContent=CURRENT_YEAR;
+  slider.addEventListener("input",()=>yearVal.textContent=slider.value);
+
+  const m=L.map(q(".map"),{worldCopyJump:true,minZoom:1}).setView([25,5],1);
+  addTiles(m);
+  setTimeout(()=>m.invalidateSize(),60);
+
+  const bs={index,node,map:m,marker:null,slider,guessBtn:q(".guess-btn"),status:"guessing"};
+  blocks[index]=bs;
+
+  m.on("click",e=>{
+    if(bs.status!=="guessing")return;
+    if(!bs.marker)bs.marker=L.marker(e.latlng,{icon:guessIcon,draggable:true}).addTo(m);
+    else bs.marker.setLatLng(e.latlng);
+    bs.guessBtn.disabled=false;bs.guessBtn.textContent="Submit guess";
+  });
+  bs.guessBtn.onclick=()=>submitRound(bs);
+  return bs;
+}
+
+async function submitRound(bs){
+  if(!bs.marker)return;
+  bs.status="submitting";
+  bs.guessBtn.style.display="none";
+  const ll=bs.marker.getLatLng();
+  const year=parseInt(bs.slider.value,10);
+  try{
+    const res=await api("/api/guess",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({puzzleId:game.puzzleId,round:bs.index,year,lat:ll.lat,lng:ll.lng})});
+    revealRound(bs,res,{lat:ll.lat,lng:ll.lng});
+  }catch(e){
+    toast(e.message||"Something went wrong");
+    bs.status="guessing";bs.guessBtn.style.display="";bs.guessBtn.disabled=false;bs.guessBtn.textContent="Submit guess";
+  }
+}
+
+function revealRound(bs,res,guess){
+  bs.status="done";
+  bs.slider.disabled=true;
+  const a=res.answer,q=s=>bs.node.querySelector(s);
+  game.total+=res.roundScore;
+  game.idx=bs.index+1;
+  game.results.push({
+    loc:res.locationScore,year:res.yearScore,round:res.roundScore,
+    distanceKm:res.distanceKm,yearsOff:res.yearsOff,place:a.place,actualYear:a.year,
+    imageUrl:game.rounds[bs.index].imageUrl,
+    answer:{lat:a.lat,lon:a.lon,title:a.title,author:a.author,license:a.license,sourceUrl:a.sourceUrl,year:a.year},
+    guess:{lat:guess.lat,lng:guess.lng},
+  });
+  saveState();
+
+  // map reveal
+  bs.answerMarker=L.marker([a.lat,a.lon],{icon:answerIcon}).addTo(bs.map);
+  bs.answerLine=L.polyline([[guess.lat,guess.lng],[a.lat,a.lon]],{color:"#9e2b25",weight:2,dashArray:"6 6"}).addTo(bs.map);
+  bs.map.fitBounds(bs.answerLine.getBounds(),{padding:[40,40],maxZoom:6});
+  q(".map-hint").textContent="Red pin, your guess \u00b7 teal pin, the truth";
+
+  // verdict
+  q(".rr-loc").textContent=res.locationScore.toLocaleString();q(".rr-loc").className="rr-num rr-loc "+scoreClass(res.locationScore);
+  q(".rr-year").textContent=res.yearScore.toLocaleString();q(".rr-year").className="rr-num rr-year "+scoreClass(res.yearScore);
+  q(".rr-total").textContent=res.roundScore.toLocaleString();q(".rr-total").className="rr-num rr-total "+scoreClass(res.roundScore/2);
+  const dist=res.distanceKm>=10?Math.round(res.distanceKm).toLocaleString():res.distanceKm;
+  const yrWord=Math.abs(res.yearsOff)===1?"year":"years";
+  q(".rr-detail").innerHTML=`It was <b>${a.place}</b>, <b>${a.year}</b>.<br>You were <b>${dist} km</b> off and <b>${Math.abs(res.yearsOff)} ${yrWord}</b> out.`;
+  if(a.title)q(".article-title").textContent=a.title;  // headline becomes the photo's real title, now it's safe to reveal
+  q(".attribution").innerHTML=
+    `${a.author?("Photograph by "+a.author):"Photograph"}${a.license?(" \u00b7 "+a.license):""}`+
+    `${a.sourceUrl?(' \u00b7 <a href="'+a.sourceUrl+'" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>'):""}`;
+
+  q(".score-chip").innerHTML=`<span>Tally</span>${game.total.toLocaleString()}`;
+  const result=q(".round-result");
+  result.style.display="";
+  // Bring the verdict into view so the player sees their score immediately.
+  requestAnimationFrame(()=>result.scrollIntoView({behavior:"smooth",block:"start"}));
+
+  // Review the verdict, then continue. The next dispatch (or the final tally)
+  // stacks below, and we scroll down to it.
+  const nb=q(".next-btn");
+  const last=bs.index>=game.rounds.length-1;
+  nb.textContent=last?"See the final edition":"Next round";
+  nb.onclick=()=>{
+    nb.disabled=true;
+    if(last){finishGame();}
+    else{const next=buildRound(bs.index+1);requestAnimationFrame(()=>next.node.scrollIntoView({behavior:"smooth",block:"start"}));}
+  };
+}
+
+// Rebuild an already-played round (read-only) from a saved record, so a
+// finished day reloads as the full stacked page, not a lone results screen.
+function buildRevealedRound(index,rec,runningTotal){
+  const node=el("roundTpl").content.firstElementChild.cloneNode(true);
+  el("dispatches").appendChild(node);
+  const q=s=>node.querySelector(s);
+  const a=rec.answer||{};
+
+  q(".plate").textContent=`Article No. ${romanize(index+1)}`;
+  q(".byline").textContent=ARTICLE_BYLINES[index%ARTICLE_BYLINES.length];
+  q(".article-title").textContent=a.title||ARTICLE_TITLES[index%ARTICLE_TITLES.length];
+  renderPips(q(".pips"),index);
+  q(".score-chip").innerHTML=`<span>Tally</span>${runningTotal.toLocaleString()}`;
+
+  const img=q(".photo"),loading=q(".photo-loading"),wrap=q(".photo-wrap");
+  img.onload=()=>{loading.style.display="none";img.style.display="";};
+  img.onerror=()=>{loading.textContent="Image unavailable";};
+  img.src=rec.imageUrl||"";
+  setupPanZoom(wrap,img);
+
+  const slider=q(".year-slider"),yearVal=q(".year-val");
+  slider.max=CURRENT_YEAR;q(".year-max").textContent=CURRENT_YEAR;
+  const guessYear=(a.year||0)+(rec.yearsOff||0);
+  if(guessYear){slider.value=guessYear;yearVal.textContent=guessYear;}
+  slider.disabled=true;
+  q(".guess-btn").style.display="none";
+
+  const m=L.map(q(".map"),{worldCopyJump:true,minZoom:1}).setView([25,5],1);
+  addTiles(m);
+  if(rec.guess&&a.lat!=null){
+    L.marker([rec.guess.lat,rec.guess.lng],{icon:guessIcon}).addTo(m);
+    L.marker([a.lat,a.lon],{icon:answerIcon}).addTo(m);
+    const line=L.polyline([[rec.guess.lat,rec.guess.lng],[a.lat,a.lon]],{color:"#9e2b25",weight:2,dashArray:"6 6"}).addTo(m);
+    setTimeout(()=>{m.invalidateSize();m.fitBounds(line.getBounds(),{padding:[40,40],maxZoom:6});},60);
+  }else setTimeout(()=>m.invalidateSize(),60);
+  q(".map-hint").textContent="Red pin, your guess \u00b7 teal pin, the truth";
+
+  q(".rr-loc").textContent=rec.loc.toLocaleString();q(".rr-loc").className="rr-num rr-loc "+scoreClass(rec.loc);
+  q(".rr-year").textContent=rec.year.toLocaleString();q(".rr-year").className="rr-num rr-year "+scoreClass(rec.year);
+  q(".rr-total").textContent=rec.round.toLocaleString();q(".rr-total").className="rr-num rr-total "+scoreClass(rec.round/2);
+  const dist=rec.distanceKm>=10?Math.round(rec.distanceKm).toLocaleString():rec.distanceKm;
+  const yrWord=Math.abs(rec.yearsOff)===1?"year":"years";
+  q(".rr-detail").innerHTML=`It was <b>${rec.place}</b>, <b>${rec.actualYear}</b>.<br>You were <b>${dist} km</b> off and <b>${Math.abs(rec.yearsOff)} ${yrWord}</b> out.`;
+  q(".attribution").innerHTML=
+    `${a.author?("Photograph by "+a.author):"Photograph"}${a.license?(" \u00b7 "+a.license):""}`+
+    `${a.sourceUrl?(' \u00b7 <a href="'+a.sourceUrl+'" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>'):""}`;
+  q(".round-result").style.display="";
+}
+
+// ?final=1 shortcut: fabricate a finished game and jump to the results page.
+async function buildFakeFinal(){
+  const n=game.rounds.length||5;
+  game.idx=n;game.total=0;game.results=[];game.maxGameScore=n*10000;game.id=genId();
+  for(let i=0;i<n;i++){
+    const loc=Math.floor(Math.random()*5001),yr=Math.floor(Math.random()*5001);
+    game.total+=loc+yr;
+    game.results.push({loc,year:yr,round:loc+yr,distanceKm:Math.round(Math.random()*5000),yearsOff:Math.floor(Math.random()*50),place:"Testville",actualYear:1950});
+  }
+  const team=ls("dailytimeguess:team")||"Our Team";
+  // Seed editions dated forward from LAUNCH_DATE so each gets a distinct No.
+  const launch=new Date(LAUNCH_DATE+"T00:00:00");
+  const games=[];
+  for(let i=0;i<8;i++){
+    const d=new Date(launch);d.setDate(launch.getDate()+i);
+    games.push({score:i===0?game.total:Math.floor(Math.random()*(game.maxGameScore+1)),puzzleId:d.toISOString().slice(0,10)});
+  }
+  games.sort((a,b)=>b.score-a.score);
+  // Locally, seed these fake editions into history so "Past Editions" has rows
+  // to show (mock mode otherwise only ever stores one "sample" edition).
+  if(MOCK_MODE){
+    if(!ls("dailytimeguess:team"))ls("dailytimeguess:team",team);
+    const hist=ls("dailytimeguess:history")||[];
+    games.forEach(g=>{if(!hist.some(h=>h.team===team&&h.puzzleId===g.puzzleId))hist.push({team,score:g.score,puzzleId:g.puzzleId});});
+    ls("dailytimeguess:history",hist);
+  }
+  const mine={team,count:games.length,best:games[0].score,games};
+  renderFinal(getStreak(),Math.max(ls("dailytimeguess:best")||0,game.total),mine,team,true);
+}
+
+// ---- Streak / best --------------------------------------------------------
+function getStreak(){return ls("dailytimeguess:streak")||{current:0,max:0,lastId:null}}
+function updateStreak(){
+  const s=getStreak();
+  if(s.lastId===game.puzzleId)return s;
+  if(s.lastId){
+    const prev=new Date(s.lastId),cur=new Date(game.puzzleId);
+    const days=Math.round((cur-prev)/86400000);
+    s.current=days===1?s.current+1:1;
+  }else s.current=1;
+  s.max=Math.max(s.max,s.current);s.lastId=game.puzzleId;
+  ls("dailytimeguess:streak",s);return s;
+}
+
+async function fetchTeamScores(team){
+  if(!team)return null;
+  try{return await api("/api/scores/team/"+encodeURIComponent(team));}catch(e){return null;}
+}
+
+// Each edition is filed to the backend once per device - never twice, never
+// under two teams. gameId is the playthrough's unique id, stored with the score.
+function isFiled(){return (ls("dailytimeguess:filed")||[]).includes(game.puzzleId);}
+// Returns "ok" (filed), "conflict" (team already took today's edition - first
+// write wins), or "error". Locked once filed on this device.
+async function commitScore(team){
+  if(!team)return "error";
+  if(isFiled())return "ok";
+  try{
+    await api("/api/scores",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({team,score:game.total,puzzleId:game.puzzleId,gameId:game.id})});
+    const filed=ls("dailytimeguess:filed")||[];filed.push(game.puzzleId);ls("dailytimeguess:filed",filed);
+    return "ok";
+  }catch(e){return (e&&e.status===409)?"conflict":"error";}
+}
+
+async function finishGame(){
+  game.status="done";saveState();
+  const best=Math.max(ls("dailytimeguess:best")||0,game.total);
+  ls("dailytimeguess:best",best);
+  const streak=game.puzzleId==="sample"?getStreak():updateStreak();
+
+  const team=ls("dailytimeguess:team");
+  let notice="";
+  if(team){const r=await commitScore(team);if(r==="conflict")notice="\u201C"+team+"\u201D has already filed today's edition - enter a different name.";}
+  const mine=isFiled()?await fetchTeamScores(team):null;
+  renderFinal(streak,best,mine,team,true,notice);
+}
+
+function emojiFor(score){return score>=4000?"\uD83D\uDFE9":score>=2000?"\uD83D\uDFE8":"\u2B1B"}
+
+function renderFinal(streak,best,mine,team,scroll=true,notice=""){
+  const fs=el("finalScreen");fs.style.display="";
+  const pct=Math.round(game.total/game.maxGameScore*100);
+  let grid="";
+  game.results.forEach((r,i)=>{grid+=`<div class="fg-round"><div class="fg-cats"><span>L</span><span>Y</span></div><div class="fg-sq"><span>${emojiFor(r.loc)}</span><span>${emojiFor(r.year)}</span></div><div class="fg-lbl">R${i+1}</div></div>`;});
+
+  // Score distribution of THIS team's own games.
+  const myScores=mine&&mine.games?mine.games.map(g=>g.score):[];
+  let statsHtml="";
+  if(myScores.length){
+    const n=Math.max(1,Math.round(game.maxGameScore/10000));
+    const dist=new Array(n).fill(0);
+    myScores.forEach(s=>{dist[Math.max(0,Math.min(n-1,Math.floor(s/10000)))]++;});
+    const mx=Math.max(1,...dist);
+    const myBucket=Math.min(n-1,Math.floor(game.total/10000));
+    const avg=Math.round(myScores.reduce((x,y)=>x+y,0)/myScores.length);
+    statsHtml=`<div class="stats"><h3>Your team's ${mine.count} game${mine.count===1?"":"s"} \u00b7 best ${Number(mine.best).toLocaleString()} \u00b7 avg ${avg.toLocaleString()}</h3>`;
+    for(let k=0;k<n;k++){
+      const v=dist[k],w=Math.round(v/mx*100),lo=k*10,hi=(k+1)*10;
+      statsHtml+=`<div class="dist-row"><div class="dist-lbl">${lo}-${hi}k</div><div class="dist-bar-wrap"><div class="dist-bar${k===myBucket?" mine":""}" style="width:${Math.max(w,8)}%">${v}</div></div></div>`;
+    }
+    statsHtml+="</div>";
+  }
+
+  // Team name: entered once at the end, then remembered on this device so you
+  // don't retype it each day.
+  let teamHtml;
+  if(isFiled()&&team){
+    teamHtml=`<p class="final-note">Filed under <b>${esc(team)}</b> &middot; this edition is saved once and can't be re-filed.</p>`;
+  }else{
+    teamHtml=`${notice?`<p class="final-warn">${esc(notice)}</p>`:""}<div class="team-form">
+        <input id="finalTeamInput" class="lb-name-input" placeholder="Enter your team name&hellip;" maxlength="30" value="${esc(team||"")}">
+        <button class="btn primary" id="finalTeamSave">Save score</button>
+      </div>
+      <p class="final-note">Saved on this device - you only enter it once. First to file an edition keeps it.</p>`;
+  }
+
+  const bestShown=Math.max(best,mine?mine.best:0);
+  fs.innerHTML=`
+    <section class="panel final">
+      <div class="overline">Extra &middot; Extra</div>
+      <h2>The Final Tally</h2>
+      <p class="final-standfirst">Your articles are filed. Herewith, the day's reckoning.</p>
+      <div class="final-total">${game.total.toLocaleString()}<small>of ${game.maxGameScore.toLocaleString()} \u00b7 ${pct}%</small></div>
+      <div class="final-grid">${grid}</div>
+      <div class="streak-row">
+        <div class="streak-item"><div class="streak-num">${streak.current}</div><div class="streak-lbl">Day streak</div></div>
+        <div class="streak-item"><div class="streak-num">${Number(bestShown).toLocaleString()}</div><div class="streak-lbl">Team best</div></div>
+      </div>
+      ${teamHtml}
+      ${statsHtml}
+      <div class="rule-thin final-sep"></div>
+      <button class="btn primary" id="shareBtn">Share result</button>
+      <button class="btn ghost" id="lbOpenBtn">Past Editions</button>
+    </section>`;
+
+  el("shareBtn").onclick=()=>shareResult(grid);
+  el("lbOpenBtn").onclick=openPastEditions;
+  const saveBtn=el("finalTeamSave");
+  if(saveBtn){
+    const inp=el("finalTeamInput");
+    const go=()=>saveTeamScore(inp.value,streak);
+    saveBtn.onclick=go;
+    inp.addEventListener("keydown",ev=>{if(ev.key==="Enter")go();});
+  }
+  if(scroll)fs.scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+// Save this game's score under a (possibly new) team name, then re-render.
+async function saveTeamScore(name,streak){
+  name=(name||"").trim().slice(0,30);
+  if(!name){toast("Enter a team name");return;}
+  ls("dailytimeguess:team",name);
+  const r=await commitScore(name);
+  if(r==="conflict"){
+    renderFinal(streak,Math.max(ls("dailytimeguess:best")||0,game.total),null,name,false,
+      "\u201C"+name+"\u201D has already filed today's edition - enter a different name.");
+    return;
+  }
+  const mine=isFiled()?await fetchTeamScores(name):null;
+  renderFinal(streak,Math.max(ls("dailytimeguess:best")||0,game.total),mine,name,false);
+}
+
+function shareResult(){
+  let lines=`The Atlas - ${prettyDate(game.puzzleId)}\n${game.total.toLocaleString()}/${game.maxGameScore.toLocaleString()}\n`;
+  game.results.forEach((r,i)=>{lines+=`${emojiFor(r.loc)}${emojiFor(r.year)} R${i+1}\n`;});
+  lines+=(MOCK_MODE?"":location.origin+location.pathname);
+  if(navigator.share&&!MOCK_MODE){navigator.share({text:lines}).catch(()=>{});}
+  else{navigator.clipboard.writeText(lines).then(()=>toast("Copied to clipboard!")).catch(()=>toast("Copy failed"));}
+}
+
+// ---- Past Editions: this team's own ten best games -----------------------
+async function openPastEditions(){
+  el("lbModal").classList.add("open");
+  const team=ls("dailytimeguess:team");if(team)el("lbNameInput").value=team;
+  const body=el("lbBody");
+  if(!team){body.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--ink-soft)">Enter your team name above to start saving editions.</td></tr>';return;}
+  body.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--ink-soft)">Loading\u2026</td></tr>';
+  try{
+    const data=await api("/api/scores/team/"+encodeURIComponent(team));
+    const games=(data.games||[]).slice(0,10);
+    if(!games.length){body.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--ink-soft)">No editions played yet.</td></tr>';return;}
+    body.innerHTML=games.map((g,i)=>{
+      const dt=(g.puzzleId&&g.puzzleId!=="sample")?new Date(g.puzzleId+"T00:00:00"):null;
+      const no=dt?("No. "+editionNo(dt).toLocaleString()):"\u2013";
+      const ds=dt?dt.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):"\u2013";
+      return `<tr><td class="lb-rank">${i+1}</td><td>${Number(g.score).toLocaleString()}</td><td>${no}</td><td>${ds}</td></tr>`;
+    }).join("");
+  }catch(e){body.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--bad)">Could not load</td></tr>';}
+}
+// Testing-only restart: clears today's saved progress and reloads.
+if(IS_LOCAL||TEST_MODE){
+  const rb=el("restartBtn");
+  if(rb){rb.style.display="inline";rb.onclick=()=>{try{localStorage.removeItem(saveKey());localStorage.removeItem("dailytimeguess:history");localStorage.removeItem("dailytimeguess:filed");}catch(e){}location.reload();};}
+}
+el("lbBtn")&&(el("lbBtn").onclick=openPastEditions);
+el("lbClose").onclick=()=>el("lbModal").classList.remove("open");
+el("lbModal").onclick=e=>{if(e.target===el("lbModal"))el("lbModal").classList.remove("open");};
+el("lbNameInput").addEventListener("change",async e=>{
+  const v=e.target.value.trim().slice(0,30);
+  if(!v)return;
+  ls("dailytimeguess:team",v);
+  if(game.status==="done"){const r=await commitScore(v);if(r==="conflict")toast("\u201C"+v+"\u201D already filed today's edition");}
+  openPastEditions();
+});
+
+// ---- Boot -----------------------------------------------------------------
+async function boot(){
+  setFolio(new Date());
+  try{
+    const p=await api("/api/puzzle/today");
+    game.puzzleId=p.puzzleId;game.rounds=p.rounds;game.maxGameScore=p.maxGameScore||p.rounds.length*10000;
+    const isSample=!p.puzzleId||p.puzzleId==="sample";
+    const editionDate=isSample?new Date():new Date(p.puzzleId+"T00:00:00");
+    setFolio(editionDate);
+    const dateText=editionDate.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+    el("puzzleDate").textContent=dateText+(MOCK_MODE?"  \u00b7  SAMPLE":"");
+
+    if(FINAL_TEST){buildFakeFinal();return;}
+
+    const saved=loadSaved();
+    if(saved&&saved.status==="done"){
+      game.idx=game.rounds.length;game.total=saved.total;game.results=saved.results||[];game.status="done";game.id=saved.id||genId();
+      // Rebuild each played round (when we saved enough detail), then the final
+      // tally at the bottom - no jump, the page just extends down.
+      let running=0;
+      game.results.forEach((rec,i)=>{if(rec&&rec.answer){running+=rec.round;buildRevealedRound(i,rec,running);}});
+      const team=ls("dailytimeguess:team");
+      const mine=await fetchTeamScores(team);
+      renderFinal(getStreak(),Math.max(ls("dailytimeguess:best")||0,saved.total),mine,team,false);
+      window.scrollTo({top:0});
+    }else{
+      game.idx=0;game.total=0;game.results=[];game.id=genId();
+      buildRound(0);
+    }
+  }catch(e){
+    el("puzzleDate").textContent="Could not load today's puzzle";
+    toast(e.message||"Failed to load");
+  }
+}
+boot();
+</script>
+</body>
+</html>

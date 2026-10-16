@@ -1,0 +1,71 @@
+{
+  "puzzleId": "sample",
+  "generatedAt": "2026-10-16T09:46:36.953091+00:00",
+  "rounds": [
+    {
+      "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/e/e2/1999_294-20A_Ecuador_Quito.jpg",
+      "year": 1999,
+      "lat": -0.2202,
+      "lon": -78.5123,
+      "place": "Quito",
+      "title": "1999 294-20A Ecuador Quito.jpg",
+      "description": "The Church of San Francisco (Iglesia de San Francisco) on the Plaza de San Francisco is the oldest cathedral in South America, its construction having commenced in 1550 CE",
+      "author": "Dan Lundberg",
+      "license": "CC BY-SA 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:1999_294-20A_Ecuador_Quito.jpg"
+    },
+    {
+      "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5c/Lisboa_Hs_1002-0009-265.jpg/1280px-Lisboa_Hs_1002-0009-265.jpg",
+      "year": 1951,
+      "lat": 38.7078,
+      "lon": -9.1366,
+      "place": "Lisbon",
+      "title": "Lisboa Hs 1002-0009-265.jpg",
+      "description": "Instituto Superior Técnico, Lisboa, Portugal",
+      "author": "Unknown author Unknown author (ETH-Bibliothek Zürich, Bildarchiv)",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Lisboa_Hs_1002-0009-265.jpg"
+    },
+    {
+      "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8c/Greenwich_-_Romney_Road_-_National_Maritime_Museum_1937_%28Building_1807%29_-_Panorama_with_Queen%27s_House_04.jpg/1280px-Greenwich_-_Romney_Road_-_National_Maritime_Museum_1937_%28Building_1807%29_-_Panorama_with_Queen%27s_House_04.jpg",
+      "year": 1937,
+      "lat": 51.5074,
+      "lon": -0.1278,
+      "place": "London",
+      "title": "Greenwich - Romney Road - National Maritime Museum 1937 (Building 1807) - Panorama with Queen's House 04.jpg",
+      "description": "Greenwich - Romney Road - National Maritime Museum 1937 (Building 1807) - Panorama with Queen's House",
+      "author": "Txllxt TxllxT",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Greenwich_-_Romney_Road_-_National_Maritime_Museum_1937_(Building_1807)_-_Panorama_with_Queen%27s_House_04.jpg"
+    },
+    {
+      "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2c/View_of_the_Citadel_%281906%29_-_TIMEA.jpg",
+      "year": 1906,
+      "lat": 30.0444,
+      "lon": 31.2357,
+      "place": "Cairo",
+      "title": "View of the Citadel (1906) - TIMEA.jpg",
+      "description": "A view of the Citadel from outside the city.",
+      "author": "Sanderson",
+      "license": "CC BY-SA 2.5",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.5",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:View_of_the_Citadel_(1906)_-_TIMEA.jpg"
+    },
+    {
+      "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/30/01072701Napoli.jpg/1280px-01072701Napoli.jpg",
+      "year": 2001,
+      "lat": 40.8359,
+      "lon": 14.2488,
+      "place": "Naples",
+      "title": "01072701Napoli.jpg",
+      "description": "Naples,Italy.",
+      "author": "Kiyokun at Japanese Wikipedia",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "http://creativecommons.org/licenses/by-sa/3.0/",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:01072701Napoli.jpg"
+    }
+  ]
+}

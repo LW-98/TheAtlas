@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Daily TimeGuess - a daily "guess when & where this photo was taken" game.
+  A scheduled Lambda builds each day's 5-photo puzzle from Wikimedia Commons and
+  stores it in S3; a game API (API Gateway HTTP API + Lambda + DynamoDB) serves
+  it and scores guesses. Fully serverless and scale-to-zero.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 128
+    Architectures:
+      - arm64
+
+Parameters:
+  CorsOrigin:
+    Type: String
+    Default: "*"
+    Description: Allowed CORS origin. Lock this to your site once deployed.
+  BuildSchedule:
+    Type: String
+    Default: "cron(0 0 * * ? *)"
+    Description: When to build each day's puzzle (default 00:00 UTC daily).
+  RoundsPerDay:
+    Type: Number
+    Default: 5
+    Description: Photos per daily puzzle.
+
+Resources:
+  # --- Storage ----------------------------------------------------------------
+
+  PuzzleBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "daily-timeguess-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        # The daily puzzle images (images/*) are served publicly to players via
+        # a bucket policy below. ACLs stay blocked; only that policy is allowed.
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+
+  PuzzleBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PuzzleBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Only the images prefix is public. The puzzle JSON (with answers)
+          # and the geocode cache stay private - the game Lambda reads those.
+          - Sid: PublicReadDailyImages
+            Effect: Allow
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::daily-timeguess-${AWS::AccountId}/images/*"
+
+  # One row per (team, puzzleId): a team's score for a given day. Query by team
+  # for that team's history; scan for the global best-10 across all teams.
+  ScoresTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: team
+          AttributeType: S
+        - AttributeName: puzzleId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: team
+          KeyType: HASH
+        - AttributeName: puzzleId
+          KeyType: RANGE
+
+  # --- API --------------------------------------------------------------------
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref CorsOrigin
+        AllowHeaders:
+          - content-type
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+
+  # --- Game Lambda ------------------------------------------------------------
+
+  GameFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/handlers/
+      Handler: app.handler
+      Timeout: 10
+      Environment:
+        Variables:
+          SCORES_TABLE: !Ref ScoresTable
+          PUZZLE_BUCKET: !Ref PuzzleBucket
+          # Set to "false" before going fully live to disable the ?date= replay.
+          ALLOW_DATE_OVERRIDE: "true"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScoresTable
+        - S3ReadPolicy:
+            BucketName: !Ref PuzzleBucket
+      Events:
+        GetPuzzle:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /api/puzzle/today
+        PostGuess:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /api/guess
+        PostScore:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /api/scores
+        GetTeamScores:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /api/scores/team/{team}
+
+  # --- Daily puzzle builder Lambda --------------------------------------------
+
+  DailyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/daily/
+      Handler: app.handler
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          PUZZLE_BUCKET: !Ref PuzzleBucket
+          ROUNDS_PER_DAY: !Ref RoundsPerDay
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref PuzzleBucket
+      Events:
+        DailyBuild:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref BuildSchedule
+            Description: Build the day's TimeGuess puzzle
+            Enabled: true
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for the Daily TimeGuess API.
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com"
+  PuzzleBucketName:
+    Description: S3 bucket holding daily puzzles and re-hosted images.
+    Value: !Ref PuzzleBucket
+  ScoresTableName:
+    Description: DynamoDB table storing each team's daily scores.
+    Value: !Ref ScoresTable

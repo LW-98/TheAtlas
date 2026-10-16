@@ -1,0 +1,2 @@
+# The Lambda runtime already provides boto3, and everything else used here
+# (urllib, json, random) is in the standard library. No runtime deps.

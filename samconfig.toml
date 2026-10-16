@@ -1,0 +1,16 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "daily-timeguess"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+region = "eu-west-2"
+# Lock down CORS to your site once deployed, e.g.:
+# parameter_overrides = "CorsOrigin=https://your-portfolio-domain.com"
