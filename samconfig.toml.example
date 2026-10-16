@@ -1,0 +1,25 @@
+version = 0.1
+
+# Copy this file to samconfig.toml and fill in your own values before deploying.
+# samconfig.toml is gitignored because it holds deploy-specific details (your
+# AWS account ID in the bucket/CORS origin, chosen region, etc.).
+
+[default.global.parameters]
+stack_name = "daily-timeguess"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+region = "eu-west-2"
+# Lock CORS to the origin that serves the frontend and keep the ?date= replay
+# override off for a live game. The frontend is hosted in the same bucket under
+# web/, so the origin is the bucket's S3 URL (swap in your account ID), or your
+# custom domain once you have one, e.g. https://theatlasnewspaper.co.uk
+# For local testing, override with:
+#   sam deploy --parameter-overrides "CorsOrigin=* AllowDateOverride=true"
+parameter_overrides = "CorsOrigin=https://daily-timeguess-<YOUR_AWS_ACCOUNT_ID>.s3.eu-west-2.amazonaws.com AllowDateOverride=false"

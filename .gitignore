@@ -29,6 +29,10 @@ ENV/
 # AWS SAM build artifacts
 .aws-sam/
 
+# Local deploy config (holds your AWS account ID / region). Use
+# samconfig.toml.example as a template.
+samconfig.toml
+
 # Local scratch
 scripts/_probe.py
 *.log

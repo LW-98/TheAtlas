@@ -26,6 +26,15 @@ Parameters:
     Type: Number
     Default: 5
     Description: Photos per daily puzzle.
+  AllowDateOverride:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >
+      Allow the ?date= replay override on the puzzle API. Keep "false" for a
+      live game; set "true" only for local testing or replaying past editions.
 
 Resources:
   # --- Storage ----------------------------------------------------------------
@@ -49,13 +58,16 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # Only the images prefix is public. The puzzle JSON (with answers)
-          # and the geocode cache stay private - the game Lambda reads those.
-          - Sid: PublicReadDailyImages
+          # Public: the daily images and the static frontend (web/). The puzzle
+          # JSON (with answers) and the geocode cache stay private - only the
+          # game Lambda reads those.
+          - Sid: PublicReadImagesAndSite
             Effect: Allow
             Principal: "*"
             Action: "s3:GetObject"
-            Resource: !Sub "arn:aws:s3:::daily-timeguess-${AWS::AccountId}/images/*"
+            Resource:
+              - !Sub "arn:aws:s3:::daily-timeguess-${AWS::AccountId}/images/*"
+              - !Sub "arn:aws:s3:::daily-timeguess-${AWS::AccountId}/web/*"
 
   # One row per (team, puzzleId): a team's score for a given day. Query by team
   # for that team's history; scan for the global best-10 across all teams.
@@ -101,8 +113,7 @@ Resources:
         Variables:
           SCORES_TABLE: !Ref ScoresTable
           PUZZLE_BUCKET: !Ref PuzzleBucket
-          # Set to "false" before going fully live to disable the ?date= replay.
-          ALLOW_DATE_OVERRIDE: "true"
+          ALLOW_DATE_OVERRIDE: !Ref AllowDateOverride
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ScoresTable
