@@ -1,20 +1,25 @@
 """
 Builds one day's puzzle; runs daily at midnight UTC.
 
-Each run picks five quality photos from Wikimedia Commons across different
-cities and eras, copies their images into our own S3 bucket (so the game still
-works if Wikimedia is blocked on a corporate network), and writes the puzzle -
-answers included - to S3:
+Each run picks five quality, guessable photos across different cities and eras,
+copies their images into our own S3 bucket (so the game still works if the
+source is blocked on a corporate network), and writes the puzzle - answers
+included - to S3:
 
-    images/<date>/<n>.jpg   the five photos (public-read)
+    images/<date>/<n>.jpg   the five photos
     puzzle/<date>.json      that day's puzzle, archived
     puzzle/current.json     what the game serves right now
 
-Photos come from Commons' "<year> in <city>" categories, so every photo has a
-known year and city without relying on sparse EXIF data. City coordinates are
-looked up once via OpenStreetMap and cached, so adding a city is just adding a
-name to cities.py. Commons content is freely licensed; we keep each photo's
-attribution and show it on the reveal.
+Photos come from Wikimedia Commons' "<year> in <city>" categories, so every
+photo has a known year and city without relying on sparse EXIF data. Candidates
+go through a photo screen (so we don't serve paintings, prints or scanned
+documents) and must then be guessable: a photo is used only if it also sits in a
+scene category - Streets, Buildings, Views, Squares, Churches, Stations - which
+means an outdoor, locatable place rather than an interior, portrait or close-up.
+
+City coordinates are looked up once via OpenStreetMap and cached, so the answer
+location is the city centre; adding a city is just a name in cities.py. Each
+photo keeps its attribution, shown on the reveal, per its licence.
 """
 
 import json
@@ -66,22 +71,93 @@ TITLE_DENYLIST = (
 # substrings against a file's categories - more reliable than the title alone,
 # which misses plenty of artwork and scans (e.g. "Thomas Moran - Venice, 1896").
 CATEGORY_DENYLIST = (
-    "painting", "drawing", "engraving", "lithograph", "etching", "sketch",
-    "watercolor", "watercolour", "illustration", "portrait", "artwork",
-    "caricature", "cartoon", "sculpture", "map", "diagram", "document",
-    "manuscript", "poster", "advertis", "coat of arms", "logo", "stamp",
-    "banknote", "coin", "medal", "sheet music", "book illustrations",
-    "magazine", "newspaper", "postcard",
+    "painting", "drawing", "engraving", "lithograph", "chromolithograph",
+    "photochrom", "etching", "aquatint", "mezzotint", "sketch", "woodcut",
+    "watercolor", "watercolour", "aquarelle", "gouache", "illustration",
+    "portrait", "artwork", "caricature", "cartoon", "sculpture", "frontispiece",
+    "map", "diagram", "document", "manuscript", "poster", "advertis",
+    "coat of arms", "logo", "stamp", "banknote", "coin", "medal", "sheet music",
+    "book illustrations", "magazine", "newspaper", "postcard",
+    "travelers in the middle east",  # TIMEA: scanned travel-book plates, mostly art
+    # Scanned paper documents - text, not scenes.
+    "by-law", "bylaw", "pamphlet", "leaflet", "brochure", "title page",
+    "book cover", "certificate", "letterhead", "catalogue",
+)
+
+# Words that reliably mark a non-photo (a painting, print, book plate or scanned
+# document) even when they surface only in a file's description or credit, not
+# its title or categories - which is how these slip through (e.g. a watercolour
+# whose only tell is the description "Painting." and a credit citing the source
+# book, or a bylaws booklet). Kept deliberately specific so real photo captions
+# ("portrait orientation", "a road map on the wall") don't trip it.
+DESCRIPTION_DENY_TERMS = (
+    # Artwork / prints
+    "painting", "watercolour", "watercolor", "aquarelle", "gouache",
+    "oil on canvas", "tempera", "pastel drawing", "lithograph",
+    "chromolithograph", "oleograph", "engraving", "etching", "aquatint",
+    "mezzotint", "woodcut", "wood engraving", "steel engraving",
+    "illustrated by", "illus. in colour", "illus. in color", "colour plate",
+    "color plate", "frontispiece", "fresco", "mural painting", "drawing of",
+    "print of", "sketch of",
+    "travelers in the middle east",
+    # Scanned documents
+    "bylaws", "by-laws", "title page", "book cover", "pamphlet", "leaflet",
+)
+
+# The real root cause of non-photos: almost all of them (paintings, engravings,
+# drawings, book plates, documents) reach Commons through a handful of
+# scanned-book and archive bulk-upload pipelines, which stamp a recognisable
+# signature into the file's description or credit. Screening on that source -
+# rather than trying to name every art form - catches the whole class in one
+# rule and keeps working as new material arrives from the same pipelines.
+SCAN_PROVENANCE_MARKERS = (
+    "find matches",                              # Internet Archive book-image bot
+    "identifier :", "identifier:",               # IA / book-scan metadata dumps
+    "book contributor", "digitizing sponsor",
+    "digitized by", "digitised by",
+    "archive.org/details", "archive.org/stream",
+    "bub_gb_", "books.google",                   # Google Books scans
+    "travelers in the middle east",              # TIMEA travel-book plates
+    "from the book", "plate from", "scanned from",
+)
+
+# Positive guessability signal: a file that also sits in one of these scene
+# categories ("Streets in Paris", "Churches in Vienna", "Views of Lisbon", ...)
+# shows an outdoor, locatable place - exactly what the game needs - so we prefer
+# those over equally-valid-but-dull candidates like interiors or close-ups.
+SCENE_CATEGORY_HINTS = (
+    "street", "avenue", "boulevard", "road", "square", "plaza", "piazza",
+    "building", "architecture", "skyline", "cityscape", "panorama", "aerial",
+    "view of", "views of", "harbour", "harbor", "port", "waterfront", "quay",
+    "bridge", "castle", "palace", "church", "cathedral", "basilica", "chapel",
+    "mosque", "temple", "synagogue", "tower", "monument", "memorial", "gate",
+    "market", "fountain", "station", "railway", "stadium", "park", "garden",
+    "town hall", "city hall", "landmark", "promenade", "waterfall",
+)
+
+# People-as-subject categories. A scene category can match on the venue (a
+# concert hall, a theatre) while the photo is really a portrait of performers -
+# not a locatable place - so these veto a candidate even when a scene category
+# is present. Sport is deliberately NOT here: a player in national or club kit
+# is a useful location clue, so sports photos tagged with a venue are allowed.
+PEOPLE_SUBJECT_HINTS = (
+    "musicians", "singers", "guitarists", "bands", "orchestras", "choirs",
+    "actors", "actresses", "dancers", "performers",
 )
 
 s3 = boto3.client("s3")
 
 
-# --- Wikimedia helpers --------------------------------------------------------
+# --- Shared helpers -----------------------------------------------------------
 
-def _api(params: dict) -> dict:
-    params = {**params, "format": "json"}
-    url = API + "?" + urllib.parse.urlencode(params)
+def _clean(text: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", text or "")
+    text = re.sub(r"&[a-z]+;", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _http_json(url: str) -> dict:
+    """GET a JSON API with a UA, light retry on throttling."""
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     for attempt in range(4):
         try:
@@ -97,6 +173,18 @@ def _api(params: dict) -> dict:
             print(f"  error: {e}")
             time.sleep(2)
     return {}
+
+
+def denied(title: str) -> bool:
+    low = title.lower()
+    return any(bad in low for bad in TITLE_DENYLIST)
+
+
+# --- Wikimedia queries --------------------------------------------------------
+
+def _api(params: dict) -> dict:
+    params = {**params, "format": "json"}
+    return _http_json(API + "?" + urllib.parse.urlencode(params))
 
 
 def category_files(cat: str) -> list:
@@ -129,16 +217,7 @@ def image_details(titles: list) -> dict:
     return result
 
 
-def _clean(text: str) -> str:
-    text = re.sub(r"<[^>]+>", " ", text or "")
-    text = re.sub(r"&[a-z]+;", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def denied(title: str) -> bool:
-    low = title.lower()
-    return any(bad in low for bad in TITLE_DENYLIST)
-
+# --- Photo screening ----------------------------------------------------------
 
 def _bad_categories(cats: list) -> bool:
     """True if the categories mark the file as artwork, a scan, a map, etc.
@@ -147,10 +226,25 @@ def _bad_categories(cats: list) -> bool:
     return any(bad in blob for bad in CATEGORY_DENYLIST)
 
 
+def _nonphoto_metadata(ii: dict) -> bool:
+    """True if a file's description/credit gives it away as a non-photo:
+    scanned-book / archive provenance (the root cause) or explicit art/document
+    words. Commons routinely leaves the title and categories clean while the real
+    story sits in the description/credit, so that is where the signal lives."""
+    meta = ii.get("extmetadata") or {}
+    blob = " ".join(
+        _clean((meta.get(field) or {}).get("value", ""))
+        for field in ("ImageDescription", "Credit", "ObjectName", "Artist")
+    ).lower()
+    return (any(marker in blob for marker in SCAN_PROVENANCE_MARKERS)
+            or any(term in blob for term in DESCRIPTION_DENY_TERMS))
+
+
 def is_quality(title: str, ii: dict, cats: list) -> bool:
     """Keep only real raster photos: decent resolution, roughly landscape (not a
-    tall document scan), and not flagged as artwork by title or category."""
-    if denied(title) or _bad_categories(cats):
+    tall document scan), and not flagged as artwork or a document by title,
+    category or the file's own description/credit."""
+    if denied(title) or _bad_categories(cats) or _nonphoto_metadata(ii):
         return False
     if ii.get("mime") not in ALLOWED_MIME:
         return False
@@ -162,6 +256,55 @@ def is_quality(title: str, ii: dict, cats: list) -> bool:
     if not (MIN_RATIO <= ratio <= MAX_RATIO):
         return False
     return bool(ii.get("thumburl"))
+
+
+def _is_scene(cats: list) -> bool:
+    """True if the file's categories place it in an outdoor, locatable scene (a
+    street, a landmark, a view) and it isn't a people-subject photo (players,
+    musicians) that merely happens to be tagged with its venue."""
+    blob = " | ".join(cats).lower()
+    if any(hint in blob for hint in PEOPLE_SUBJECT_HINTS):
+        return False
+    return any(hint in blob for hint in SCENE_CATEGORY_HINTS)
+
+
+def find_photo(city: str) -> dict | None:
+    """A quality, guessable scene photo from a Wikimedia '<year> in <city>'
+    category for a random year. The location must be guessable, so a scene
+    category (street / landmark / view) is required - a quality photo that isn't
+    a locatable scene (an interior, an object close-up, a portrait) is skipped,
+    even if that means this city+year yields nothing and we try another.
+    Returns a find dict with the image URL + year + attribution, or None."""
+    year = random.randint(YEAR_MIN, YEAR_MAX)
+    members = category_files(f"{year} in {city}")
+    titles = [m["title"] for m in members
+              if m["title"].lower().endswith(IMG_EXT) and not denied(m["title"])]
+    if not titles:
+        return None
+
+    random.shuffle(titles)
+    details = image_details(titles[:50])
+
+    scene = [(t, details[t]) for t in titles
+             if t in details
+             and is_quality(t, details[t]["ii"], details[t]["cats"])
+             and _is_scene(details[t]["cats"])]
+    if not scene:
+        return None
+    title, entry = scene[0]
+
+    ii = entry["ii"]
+    meta = ii.get("extmetadata") or {}
+    return {
+        "thumb_url": ii["thumburl"],
+        "year": year,
+        "title": title.replace("File:", "").strip(),
+        "description": _clean((meta.get("ImageDescription") or {}).get("value", ""))[:280],
+        "author": _clean((meta.get("Artist") or {}).get("value", "")) or "Unknown",
+        "license": _clean((meta.get("LicenseShortName") or {}).get("value", "")) or "See source",
+        "licenseUrl": (meta.get("LicenseUrl") or {}).get("value", ""),
+        "sourceUrl": ii.get("descriptionurl", ""),
+    }
 
 
 # --- Geocoding (cached) -------------------------------------------------------
@@ -210,15 +353,24 @@ def geocode_city(city: str, cache: dict) -> list | None:
 
 # --- Image re-hosting ---------------------------------------------------------
 
-def rehost_image(thumb_url: str, key: str) -> str:
-    """Copy a Commons thumbnail into our S3 bucket and return the origin-relative
-    path the game loads. CloudFront serves the page, API and images under one
-    domain, so "/images/..." resolves to the same origin as the page - no bucket
-    URL (or account ID) is ever exposed to players."""
-    req = urllib.request.Request(thumb_url.split("?")[0], headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=30) as resp:
+def rehost_image(src_url: str, key: str) -> str:
+    """Copy a source image into our S3 bucket and return the origin-relative path
+    the game loads. CloudFront serves the page, API and images under one domain,
+    so "/images/..." resolves to the same origin as the page - no source URL (or
+    account ID) is ever exposed to players. Raises if the URL isn't an image so
+    the caller can move on."""
+    req = urllib.request.Request(src_url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=45) as resp:
+        content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         data = resp.read()
-    content_type = "image/png" if thumb_url.lower().endswith(".png") else "image/jpeg"
+    if content_type not in ALLOWED_MIME:
+        low = src_url.lower()
+        if low.endswith(".png"):
+            content_type = "image/png"
+        elif low.endswith((".jpg", ".jpeg")):
+            content_type = "image/jpeg"
+        else:
+            raise ValueError(f"not an image ({content_type or 'unknown type'})")
     s3.put_object(
         Bucket=PUZZLE_BUCKET, Key=key, Body=data,
         ContentType=content_type, CacheControl="public, max-age=31536000",
@@ -227,57 +379,6 @@ def rehost_image(thumb_url: str, key: str) -> str:
 
 
 # --- Build --------------------------------------------------------------------
-
-def pick_round(date_str: str, index: int, coords_cache: dict,
-               used_cities: set, used_years: set) -> dict | None:
-    """One attempt at a round: random city + year, first quality photo wins."""
-    city = random.choice(CITIES)
-    if city in used_cities:
-        return None
-    year = random.randint(YEAR_MIN, YEAR_MAX)
-    if year in used_years:
-        return None
-
-    members = category_files(f"{year} in {city}")
-    titles = [m["title"] for m in members
-              if m["title"].lower().endswith(IMG_EXT) and not denied(m["title"])]
-    if not titles:
-        return None
-
-    random.shuffle(titles)
-    details = image_details(titles[:50])
-    for title in titles:
-        entry = details.get(title)
-        if not entry or not is_quality(title, entry["ii"], entry["cats"]):
-            continue
-        ii = entry["ii"]
-        coords = geocode_city(city, coords_cache)
-        if not coords:
-            return None
-
-        image_key = f"images/{date_str}/{index}.jpg"
-        try:
-            image_url = rehost_image(ii["thumburl"], image_key)
-        except Exception as e:  # noqa: BLE001
-            print(f"  rehost failed for {title}: {e}")
-            continue
-
-        meta = ii.get("extmetadata") or {}
-        return {
-            "imageUrl": image_url,
-            "year": year,
-            "lat": coords[0],
-            "lon": coords[1],
-            "place": city,
-            "title": title.replace("File:", "").strip(),
-            "description": _clean((meta.get("ImageDescription") or {}).get("value", ""))[:280],
-            "author": _clean((meta.get("Artist") or {}).get("value", "")) or "Unknown",
-            "license": _clean((meta.get("LicenseShortName") or {}).get("value", "")) or "See source",
-            "licenseUrl": (meta.get("LicenseUrl") or {}).get("value", ""),
-            "sourceUrl": ii.get("descriptionurl", ""),
-        }
-    return None
-
 
 def handler(event, context):
     date_str = datetime.now(timezone.utc).date().isoformat()
@@ -289,13 +390,45 @@ def handler(event, context):
     attempts = 0
     while len(rounds) < ROUNDS_PER_DAY and attempts < MAX_ATTEMPTS:
         attempts += 1
-        picked = pick_round(date_str, len(rounds), coords_cache,
-                            used_cities, used_years)
-        if picked:
-            rounds.append(picked)
-            used_cities.add(picked["place"])
-            used_years.add(picked["year"])
-            print(f"  round {len(rounds)}: {picked['place']} {picked['year']}")
+        city = random.choice(CITIES)
+        if city in used_cities:
+            continue
+
+        try:
+            find = find_photo(city)
+        except Exception as e:  # noqa: BLE001
+            print(f"  find_photo error for {city!r}: {e}")
+            continue
+        if not find or find["year"] in used_years:
+            continue
+
+        coords = geocode_city(city, coords_cache)
+        if not coords:
+            continue
+
+        image_key = f"images/{date_str}/{len(rounds)}.jpg"
+        try:
+            image_url = rehost_image(find["thumb_url"], image_key)
+        except Exception as e:  # noqa: BLE001
+            print(f"  rehost failed for {find.get('sourceUrl')!r}: {e}")
+            continue
+
+        rounds.append({
+            "imageUrl": image_url,
+            "year": find["year"],
+            "lat": coords[0],
+            "lon": coords[1],
+            "place": city,
+            "title": find["title"],
+            "description": find["description"],
+            "author": find["author"],
+            "license": find["license"],
+            "licenseUrl": find["licenseUrl"],
+            "sourceUrl": find["sourceUrl"],
+        })
+        used_cities.add(city)
+        used_years.add(find["year"])
+        print(f"  round {len(rounds)}: {city} {find['year']}")
 
     save_coords_cache(coords_cache)
 
