@@ -35,6 +35,20 @@ Parameters:
     Description: >
       Allow the ?date= replay override on the puzzle API. Keep "false" for a
       live game; set "true" only for local testing or replaying past editions.
+  DomainName:
+    Type: String
+    Default: "theatlasnewspaper.co.uk"
+    Description: Apex domain the game is served from (also serves www.<domain>).
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: >
+      ARN of an ISSUED ACM certificate in us-east-1 covering the domain and
+      www.<domain>. Required for CloudFront to serve the custom domain over HTTPS.
+  HostedZoneId:
+    Type: String
+    Default: ""
+    Description: Route 53 hosted zone ID for the domain (for the alias records).
 
 Resources:
   # --- Storage ----------------------------------------------------------------
@@ -43,13 +57,15 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "daily-timeguess-${AWS::AccountId}"
+      # The bucket is fully private. Nothing is public: the frontend (web/) and
+      # images (images/*) reach players only through CloudFront via Origin
+      # Access Control, and the puzzle JSON / geocode cache are read only by the
+      # game Lambda over IAM. No object is ever served from an S3 URL.
       PublicAccessBlockConfiguration:
-        # The daily puzzle images (images/*) are served publicly to players via
-        # a bucket policy below. ACLs stay blocked; only that policy is allowed.
         BlockPublicAcls: true
         IgnorePublicAcls: true
-        BlockPublicPolicy: false
-        RestrictPublicBuckets: false
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
 
   PuzzleBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -58,16 +74,22 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # Public: the daily images and the static frontend (web/). The puzzle
-          # JSON (with answers) and the geocode cache stay private - only the
-          # game Lambda reads those.
-          - Sid: PublicReadImagesAndSite
+          # Only this CloudFront distribution may read the frontend and images.
+          # The puzzle JSON (with answers) and the geocode cache aren't granted
+          # here at all - and CloudFront never requests them, since the only
+          # behaviour that hits the bucket root is /images/* (the site behaviour
+          # is scoped to the web/ prefix). So answers stay unreachable from the web.
+          - Sid: CloudFrontReadSiteAndImages
             Effect: Allow
-            Principal: "*"
+            Principal:
+              Service: cloudfront.amazonaws.com
             Action: "s3:GetObject"
             Resource:
               - !Sub "arn:aws:s3:::daily-timeguess-${AWS::AccountId}/images/*"
               - !Sub "arn:aws:s3:::daily-timeguess-${AWS::AccountId}/web/*"
+            Condition:
+              StringEquals:
+                "AWS:SourceArn": !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
 
   # One row per (team, puzzleId): a team's score for a given day. Query by team
   # for that team's history; scan for the global best-10 across all teams.
@@ -169,7 +191,122 @@ Resources:
             Description: Build the day's TimeGuess puzzle
             Enabled: true
 
+  # --- CDN + custom domain ----------------------------------------------------
+
+  # Lets CloudFront (and only CloudFront) read the private S3 bucket.
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "daily-timeguess-${AWS::AccountId}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # One domain for everything: the page, the API and the images share an origin,
+  # so there's no CORS and no S3/account details are ever exposed to players.
+  #   /            -> S3 web/  (the single-page frontend)
+  #   /images/*    -> S3 images/  (the day's re-hosted photos)
+  #   /api/*       -> API Gateway (puzzle + scoring)
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: The Atlas - daily when-and-where game
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        DefaultRootObject: index.html
+        Aliases:
+          - !Ref DomainName
+          - !Sub "www.${DomainName}"
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          # The frontend lives under the web/ prefix; origin path maps / to it.
+          - Id: SiteOrigin
+            DomainName: !GetAtt PuzzleBucket.RegionalDomainName
+            OriginPath: /web
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          # Same bucket, no prefix - serves images/* straight from the root.
+          - Id: AssetsOrigin
+            DomainName: !GetAtt PuzzleBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          - Id: ApiOrigin
+            DomainName: !Sub "${Api}.execute-api.${AWS::Region}.amazonaws.com"
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+        DefaultCacheBehavior:
+          TargetOriginId: SiteOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          Compress: true
+          # Managed CachingOptimized
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CacheBehaviors:
+          - PathPattern: /images/*
+            TargetOriginId: AssetsOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            Compress: true
+            # Managed CachingOptimized
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          - PathPattern: /api/*
+            TargetOriginId: ApiOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            Compress: true
+            # Managed CachingDisabled + AllViewerExceptHostHeader so the API
+            # gets the body, query string and headers but its own Host.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+
+  # Point the apex and www at CloudFront (alias records are free in Route 53).
+  DnsRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref DomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2  # fixed CloudFront alias zone
+            EvaluateTargetHealth: false
+        - Name: !Ref DomainName
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+            EvaluateTargetHealth: false
+        - Name: !Sub "www.${DomainName}"
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+            EvaluateTargetHealth: false
+        - Name: !Sub "www.${DomainName}"
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+            EvaluateTargetHealth: false
+
 Outputs:
+  SiteUrl:
+    Description: The live game URL.
+    Value: !Sub "https://${DomainName}"
+  DistributionDomainName:
+    Description: CloudFront domain (works before DNS/cert are live).
+    Value: !GetAtt Distribution.DomainName
   ApiUrl:
     Description: Base URL for the Daily TimeGuess API.
     Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com"

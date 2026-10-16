@@ -16,10 +16,11 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
 region = "eu-west-2"
-# Lock CORS to the origin that serves the frontend and keep the ?date= replay
-# override off for a live game. The frontend is hosted in the same bucket under
-# web/, so the origin is the bucket's S3 URL (swap in your account ID), or your
-# custom domain once you have one, e.g. https://theatlasnewspaper.co.uk
+# Serve everything behind a custom domain via CloudFront. Fill in:
+#   DomainName      your apex domain (also serves www.<domain>)
+#   CertificateArn  an ISSUED ACM cert in us-east-1 covering <domain> and www.<domain>
+#   HostedZoneId    the Route 53 hosted zone ID for <domain>
+#   CorsOrigin      https://<domain> (same-origin, so this is just a safety net)
 # For local testing, override with:
 #   sam deploy --parameter-overrides "CorsOrigin=* AllowDateOverride=true"
-parameter_overrides = "CorsOrigin=https://daily-timeguess-<YOUR_AWS_ACCOUNT_ID>.s3.eu-west-2.amazonaws.com AllowDateOverride=false"
+parameter_overrides = "CorsOrigin=https://<YOUR_DOMAIN> AllowDateOverride=false DomainName=<YOUR_DOMAIN> CertificateArn=arn:aws:acm:us-east-1:<YOUR_AWS_ACCOUNT_ID>:certificate/<CERT_ID> HostedZoneId=<YOUR_HOSTED_ZONE_ID>"

@@ -211,8 +211,10 @@ def geocode_city(city: str, cache: dict) -> list | None:
 # --- Image re-hosting ---------------------------------------------------------
 
 def rehost_image(thumb_url: str, key: str) -> str:
-    """Copy a Commons thumbnail into our S3 bucket (public-read) and return the
-    public URL the game loads."""
+    """Copy a Commons thumbnail into our S3 bucket and return the origin-relative
+    path the game loads. CloudFront serves the page, API and images under one
+    domain, so "/images/..." resolves to the same origin as the page - no bucket
+    URL (or account ID) is ever exposed to players."""
     req = urllib.request.Request(thumb_url.split("?")[0], headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = resp.read()
@@ -221,7 +223,7 @@ def rehost_image(thumb_url: str, key: str) -> str:
         Bucket=PUZZLE_BUCKET, Key=key, Body=data,
         ContentType=content_type, CacheControl="public, max-age=31536000",
     )
-    return f"https://{PUZZLE_BUCKET}.s3.{REGION}.amazonaws.com/{key}"
+    return f"/{key}"
 
 
 # --- Build --------------------------------------------------------------------

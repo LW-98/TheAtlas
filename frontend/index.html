@@ -318,7 +318,10 @@ input[type=range]:disabled{opacity:.55}
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
 // ---- Config ---------------------------------------------------------------
-const API_BASE = "https://bzft71ws8k.execute-api.eu-west-2.amazonaws.com";
+// Same-origin: CloudFront serves the page, the API (/api/*) and the images
+// (/images/*) all under one domain, so requests are origin-relative and there's
+// no CORS. (When running locally the mock takes over before this is used.)
+const API_BASE = "";
 const MAX_LOCATION_SCORE = 5000, MAX_YEAR_SCORE = 5000;
 const LOCATION_SCALE_KM = 1000, YEAR_SCALE = 15;
 const CURRENT_YEAR = new Date().getFullYear();
