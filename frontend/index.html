@@ -29,7 +29,7 @@ body{font-family:var(--body);background:var(--paper);color:var(--ink);line-heigh
 h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.1}
 a{color:var(--red);text-decoration:none}
 ::selection{background:rgba(158,43,37,.2);color:var(--ink)}
-.sheet{max-width:880px;min-height:100vh;margin:0 auto;padding:26px 40px 92px;background:var(--paper);border-left:1px solid var(--line-strong);border-right:1px solid var(--line-strong)}
+.sheet{width:min(92vw,1600px);min-height:100vh;margin:0 auto;padding:26px 54px 92px;background:var(--paper);border-left:1px solid var(--line-strong);border-right:1px solid var(--line-strong)}
 
 /* Masthead / nameplate */
 .ear{display:flex;justify-content:space-between;align-items:center;font-family:var(--body);font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);padding-bottom:4px}
@@ -87,7 +87,7 @@ a{color:var(--red);text-decoration:none}
 .zoom-hint{font-style:italic;font-size:.72rem;color:var(--ink-soft);white-space:nowrap}
 
 /* Map */
-.map{height:360px;border:1px solid var(--ink);background:var(--paper)}
+.map{height:440px;border:1px solid var(--ink);background:var(--paper)}
 .leaflet-container{background:#d9cfb9;font-family:var(--body)}
 
 /* Year ruler */
@@ -264,13 +264,13 @@ input[type=range]:disabled{opacity:.55}
       <section class="panel panel-year">
         <div class="panel-head">
           <span class="panel-title">In What Year</span>
-          <span class="year-val">1950</span>
+          <span class="year-val">1960</span>
         </div>
         <div class="ruler">
           <div class="ruler-ticks" aria-hidden="true"></div>
-          <input type="range" class="year-slider" min="1850" max="2026" value="1950" step="1">
+          <input type="range" class="year-slider" min="1900" max="2026" value="1960" step="1">
         </div>
-        <div class="year-scale"><span>1850</span><span class="year-max">2026</span></div>
+        <div class="year-scale"><span class="year-min">1900</span><span class="year-max">2026</span></div>
       </section>
 
       <button class="btn btn-action guess-btn" disabled>Drop a pin to guess</button>
@@ -322,6 +322,12 @@ input[type=range]:disabled{opacity:.55}
 // (/images/*) all under one domain, so requests are origin-relative and there's
 // no CORS. (When running locally the mock takes over before this is used.)
 const API_BASE = "";
+
+// Google Maps JS API key (referrer-restricted to this domain, so it's safe in
+// client code). When set, the guess map uses Google; if Google fails to load -
+// including when the daily quota cap is reached - it falls back to the keyless
+// OpenStreetMap/Esri map below. Leave empty to use OSM only.
+const GOOGLE_MAPS_KEY = "AIzaSyCF7nPzExM3r9CvlZG5MCgZ4oCWwMmiesA";
 const MAX_LOCATION_SCORE = 5000, MAX_YEAR_SCORE = 5000;
 const LOCATION_SCALE_KM = 1000, YEAR_SCALE = 15;
 const CURRENT_YEAR = new Date().getFullYear();
@@ -454,6 +460,133 @@ function addTiles(m){
   }
 }
 
+/* ---- Map adapter: one interface, two backends -----------------------------
+   Every map goes through makeMap(container), which returns an object with the
+   same small API whether it's backed by Google Maps or Leaflet/OSM:
+     onPick(cb)                 click gives cb(lat,lng)        (active play)
+     setGuess(lat,lng,drag)     place/move the guess pin
+     getGuess() -> {lat,lng}    current guess (follows a drag)
+     addAnswer(lat,lon)         answer pin + dashed line to the guess, fit both
+     refresh()                  re-measure after the container is shown
+   The provider is chosen once at startup by initMaps(). */
+
+let MAP_PROVIDER = "osm";
+
+function leafletMap(container){
+  const m=L.map(container,{worldCopyJump:true,minZoom:1}).setView([25,5],1);
+  addTiles(m);
+  let guess=null,clickCb=null;
+  m.on("click",e=>{clickCb&&clickCb(e.latlng.lat,e.latlng.lng);});
+  setTimeout(()=>m.invalidateSize(),60);
+  return {
+    onPick(cb){clickCb=cb;},
+    setGuess(lat,lng){
+      if(!guess)guess=L.marker([lat,lng],{icon:guessIcon,draggable:true}).addTo(m);
+      else guess.setLatLng([lat,lng]);
+    },
+    getGuess(){if(!guess)return null;const ll=guess.getLatLng();return{lat:ll.lat,lng:ll.lng};},
+    addAnswer(alat,alon){
+      const g=this.getGuess();
+      L.marker([alat,alon],{icon:answerIcon}).addTo(m);
+      if(g){
+        const line=L.polyline([[g.lat,g.lng],[alat,alon]],{color:"#9e2b25",weight:2,dashArray:"6 6"}).addTo(m);
+        setTimeout(()=>{m.invalidateSize();m.fitBounds(line.getBounds(),{padding:[40,40],maxZoom:6});},60);
+      }else setTimeout(()=>m.invalidateSize(),60);
+    },
+    refresh(){setTimeout(()=>m.invalidateSize(),60);},
+  };
+}
+
+function gPin(color){return{path:google.maps.SymbolPath.CIRCLE,scale:7,fillColor:color,fillOpacity:1,strokeColor:"#f4f1e8",strokeWeight:2};}
+
+function googleMap(container,onFail){
+  const m=new google.maps.Map(container,{center:{lat:25,lng:5},zoom:2,minZoom:1,
+    disableDefaultUI:true,zoomControl:true,gestureHandling:"greedy",clickableIcons:false});
+  // Watch the real, visible map: if its tiles never load (quota spent, billing
+  // or key issue), hand this container off to the OSM fallback.
+  let ok=false;
+  const failTimer=setTimeout(()=>{if(!ok&&onFail)onFail();},4000);
+  google.maps.event.addListenerOnce(m,"tilesloaded",()=>{ok=true;clearTimeout(failTimer);});
+  let guessM=null,guess=null,clickCb=null;
+  m.addListener("click",e=>{clickCb&&clickCb(e.latLng.lat(),e.latLng.lng());});
+  return {
+    onPick(cb){clickCb=cb;},
+    setGuess(lat,lng,drag){
+      guess={lat,lng};
+      if(!guessM){
+        guessM=new google.maps.Marker({position:guess,map:m,icon:gPin("#9e2b25"),draggable:drag!==false});
+        guessM.addListener("dragend",ev=>{guess={lat:ev.latLng.lat(),lng:ev.latLng.lng()};});
+      }else guessM.setPosition(guess);
+    },
+    getGuess(){return guess;},
+    addAnswer(alat,alon){
+      new google.maps.Marker({position:{lat:alat,lng:alon},map:m,icon:gPin("#2f5f63")});
+      if(guess){
+        new google.maps.Polyline({path:[guess,{lat:alat,lng:alon}],map:m,strokeOpacity:0,
+          icons:[{icon:{path:"M 0,-1 0,1",strokeColor:"#9e2b25",strokeOpacity:1,scale:3},offset:"0",repeat:"12px"}]});
+        const b=new google.maps.LatLngBounds();b.extend(guess);b.extend({lat:alat,lng:alon});
+        m.fitBounds(b,56);
+        google.maps.event.addListenerOnce(m,"idle",()=>{if(m.getZoom()>6)m.setZoom(6);});
+      }
+    },
+    refresh(){google.maps.event.trigger(m,"resize");},
+  };
+}
+
+let gmLoad=null;
+function loadGoogleMaps(key){
+  if(gmLoad)return gmLoad;
+  gmLoad=new Promise((resolve,reject)=>{
+    if(window.google&&window.google.maps)return resolve();
+    let settled=false;
+    const done=(ok,err)=>{if(settled)return;settled=true;ok?resolve():reject(err||new Error("fail"));};
+    // Auth problems (bad key / referrer / billing / API off) fire this. Flip the
+    // whole session to OSM so later maps don't keep retrying Google.
+    window.gm_authFailure=()=>{MAP_PROVIDER="osm";done(false,new Error("auth"));};
+    window.__atlasGmReady=()=>done(true);
+    const s=document.createElement("script");
+    s.src="https://maps.googleapis.com/maps/api/js?key="+encodeURIComponent(key)+"&callback=__atlasGmReady&loading=async&v=weekly";
+    s.async=true;s.onerror=()=>done(false,new Error("script"));
+    document.head.appendChild(s);
+    setTimeout(()=>done(false,new Error("timeout")),5000);
+  });
+  return gmLoad;
+}
+
+async function initMaps(){
+  // Local/file:// stays on the keyless OSM/Esri map: a domain-locked Google key
+  // won't work off-domain, and there's no sense spending quota while developing.
+  if(IS_LOCAL||!GOOGLE_MAPS_KEY){MAP_PROVIDER="osm";return;}
+  // Use Google as soon as its library loads; whether tiles actually render
+  // (quota, billing) is judged per-map, which is reliable because the real map
+  // is on-screen. An off-screen probe is not - the API skips rendering it.
+  try{await loadGoogleMaps(GOOGLE_MAPS_KEY);MAP_PROVIDER="google";}
+  catch(e){MAP_PROVIDER="osm";}
+}
+
+// Google primary with a transparent fallback: if a Google map fails to draw,
+// its container is rebuilt as an OSM map and the operations so far are replayed,
+// so the swap is invisible to the rest of the game.
+function makeMap(container){
+  if(MAP_PROVIDER!=="google")return leafletMap(container);
+  const log=[];let pickCb=null,swapped=false,backend;
+  const swap=()=>{
+    if(swapped)return;swapped=true;MAP_PROVIDER="osm";
+    try{container.innerHTML="";}catch(e){}
+    backend=leafletMap(container);
+    if(pickCb)backend.onPick(pickCb);
+    for(const[fn,args]of log){if(backend[fn])backend[fn](...args);}
+  };
+  backend=googleMap(container,swap);
+  return {
+    onPick(cb){pickCb=cb;backend.onPick(cb);},
+    setGuess(...a){log.push(["setGuess",a]);backend.setGuess(...a);},
+    getGuess(){return backend.getGuess();},
+    addAnswer(...a){log.push(["addAnswer",a]);backend.addAnswer(...a);},
+    refresh(){backend.refresh();},
+  };
+}
+
 // ---- Photo pan & zoom (TimeGuessr-style; one instance per dispatch) --------
 function setupPanZoom(wrap,img){
   const z={scale:1,tx:0,ty:0,pointers:new Map(),lastDist:0};
@@ -501,17 +634,15 @@ function buildRound(index){
   slider.max=CURRENT_YEAR;q(".year-max").textContent=CURRENT_YEAR;
   slider.addEventListener("input",()=>yearVal.textContent=slider.value);
 
-  const m=L.map(q(".map"),{worldCopyJump:true,minZoom:1}).setView([25,5],1);
-  addTiles(m);
-  setTimeout(()=>m.invalidateSize(),60);
+  const gmap=makeMap(q(".map"));
+  gmap.refresh();
 
-  const bs={index,node,map:m,marker:null,slider,guessBtn:q(".guess-btn"),status:"guessing"};
+  const bs={index,node,gmap,slider,guessBtn:q(".guess-btn"),status:"guessing"};
   blocks[index]=bs;
 
-  m.on("click",e=>{
+  gmap.onPick((lat,lng)=>{
     if(bs.status!=="guessing")return;
-    if(!bs.marker)bs.marker=L.marker(e.latlng,{icon:guessIcon,draggable:true}).addTo(m);
-    else bs.marker.setLatLng(e.latlng);
+    gmap.setGuess(lat,lng,true);
     bs.guessBtn.disabled=false;bs.guessBtn.textContent="Submit guess";
   });
   bs.guessBtn.onclick=()=>submitRound(bs);
@@ -519,15 +650,15 @@ function buildRound(index){
 }
 
 async function submitRound(bs){
-  if(!bs.marker)return;
+  const g=bs.gmap.getGuess();
+  if(!g)return;
   bs.status="submitting";
   bs.guessBtn.style.display="none";
-  const ll=bs.marker.getLatLng();
   const year=parseInt(bs.slider.value,10);
   try{
     const res=await api("/api/guess",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({puzzleId:game.puzzleId,round:bs.index,year,lat:ll.lat,lng:ll.lng})});
-    revealRound(bs,res,{lat:ll.lat,lng:ll.lng});
+      body:JSON.stringify({puzzleId:game.puzzleId,round:bs.index,year,lat:g.lat,lng:g.lng})});
+    revealRound(bs,res,{lat:g.lat,lng:g.lng});
   }catch(e){
     toast(e.message||"Something went wrong");
     bs.status="guessing";bs.guessBtn.style.display="";bs.guessBtn.disabled=false;bs.guessBtn.textContent="Submit guess";
@@ -550,9 +681,7 @@ function revealRound(bs,res,guess){
   saveState();
 
   // map reveal
-  bs.answerMarker=L.marker([a.lat,a.lon],{icon:answerIcon}).addTo(bs.map);
-  bs.answerLine=L.polyline([[guess.lat,guess.lng],[a.lat,a.lon]],{color:"#9e2b25",weight:2,dashArray:"6 6"}).addTo(bs.map);
-  bs.map.fitBounds(bs.answerLine.getBounds(),{padding:[40,40],maxZoom:6});
+  bs.gmap.addAnswer(a.lat,a.lon);
   q(".map-hint").textContent="Red pin, your guess \u00b7 teal pin, the truth";
 
   // verdict
@@ -612,14 +741,12 @@ function buildRevealedRound(index,rec,runningTotal){
   slider.disabled=true;
   q(".guess-btn").style.display="none";
 
-  const m=L.map(q(".map"),{worldCopyJump:true,minZoom:1}).setView([25,5],1);
-  addTiles(m);
+  const gmap=makeMap(q(".map"));
   if(rec.guess&&a.lat!=null){
-    L.marker([rec.guess.lat,rec.guess.lng],{icon:guessIcon}).addTo(m);
-    L.marker([a.lat,a.lon],{icon:answerIcon}).addTo(m);
-    const line=L.polyline([[rec.guess.lat,rec.guess.lng],[a.lat,a.lon]],{color:"#9e2b25",weight:2,dashArray:"6 6"}).addTo(m);
-    setTimeout(()=>{m.invalidateSize();m.fitBounds(line.getBounds(),{padding:[40,40],maxZoom:6});},60);
-  }else setTimeout(()=>m.invalidateSize(),60);
+    gmap.setGuess(rec.guess.lat,rec.guess.lng,false);
+    gmap.addAnswer(a.lat,a.lon);
+  }
+  gmap.refresh();
   q(".map-hint").textContent="Red pin, your guess \u00b7 teal pin, the truth";
 
   q(".rr-loc").textContent=rec.loc.toLocaleString();q(".rr-loc").className="rr-num rr-loc "+scoreClass(rec.loc);
@@ -854,6 +981,7 @@ async function boot(){
 
     if(FINAL_TEST){buildFakeFinal();return;}
 
+    await initMaps();
     const saved=loadSaved();
     if(saved&&saved.status==="done"){
       game.idx=game.rounds.length;game.total=saved.total;game.results=saved.results||[];game.status="done";game.id=saved.id||genId();
