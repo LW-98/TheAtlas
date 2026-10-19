@@ -36,3 +36,6 @@ samconfig.toml
 # Local scratch
 scripts/_probe.py
 *.log
+
+# Google Maps JS key - injected into the frontend at deploy time, never committed
+maps-key.txt

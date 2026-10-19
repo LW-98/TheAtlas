@@ -323,11 +323,13 @@ input[type=range]:disabled{opacity:.55}
 // no CORS. (When running locally the mock takes over before this is used.)
 const API_BASE = "";
 
-// Google Maps JS API key (referrer-restricted to this domain, so it's safe in
-// client code). When set, the guess map uses Google; if Google fails to load -
-// including when the daily quota cap is reached - it falls back to the keyless
-// OpenStreetMap/Esri map below. Leave empty to use OSM only.
-const GOOGLE_MAPS_KEY = "AIzaSyCF7nPzExM3r9CvlZG5MCgZ4oCWwMmiesA";
+// Google Maps JS API key. Injected at deploy time from a local, gitignored file
+// (maps-key.txt) by scripts/deploy-frontend.ps1, so the real key never lives in
+// the repo. Empty here means "use the keyless OSM map"; the deployed copy has the
+// key substituted in. A Maps JS key is necessarily visible in the browser either
+// way - it's secured by the key's referrer + API + quota restrictions, not by
+// secrecy.
+const GOOGLE_MAPS_KEY = "";
 const MAX_LOCATION_SCORE = 5000, MAX_YEAR_SCORE = 5000;
 const LOCATION_SCALE_KM = 1000, YEAR_SCALE = 15;
 const CURRENT_YEAR = new Date().getFullYear();
