@@ -26,6 +26,13 @@ Parameters:
     Type: Number
     Default: 5
     Description: Photos per daily puzzle.
+  VisionBudgetPerBuild:
+    Type: Number
+    Default: 30
+    Description: >
+      Hard cap on images the daily builder sends to Amazon Rekognition per run
+      (the cost ceiling for the guessability vision gate). 0 disables the vision
+      gate and falls back to the metadata screen only.
   AllowDateOverride:
     Type: String
     Default: "false"
@@ -180,9 +187,16 @@ Resources:
         Variables:
           PUZZLE_BUCKET: !Ref PuzzleBucket
           ROUNDS_PER_DAY: !Ref RoundsPerDay
+          MAX_VISION_IMAGES: !Ref VisionBudgetPerBuild
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref PuzzleBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - rekognition:DetectLabels
+                - rekognition:DetectText
+              Resource: "*"  # Rekognition detect APIs don't support resource scoping
       Events:
         DailyBuild:
           Type: Schedule
