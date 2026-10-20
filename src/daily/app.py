@@ -159,6 +159,12 @@ URBAN_LABELS = {"city", "urban", "street", "road", "building", "architecture",
 # Rekognition misfires on those (it called a Breslau postcard "Parliament" and a
 # Turin backyard "Monastery"), which would re-admit the generic scenes we cut.
 SKYLINE_LABELS = {"skyscraper", "high rise", "metropolis", "skyline", "tower block"}
+# A distant, overhead or scenic view. The skyline labels above also fire on a
+# hazy aerial sprawl with no eye-level landmark (a far hilltop panorama), which
+# isn't guessable - these labels are the tell, so they veto the skyline cue. A
+# genuine eye-level skyline (e.g. Dubai) carries none of them.
+AERIAL_LABELS = {"aerial view", "landscape", "scenery", "satellite imagery",
+                 "bird's-eye view", "panoramic"}
 # Visible man-made cues that locate a photo in space/time.
 CUE_LABELS = {"flag", "billboard", "poster", "advertisement", "banner",
               "sign", "signage", "neon", "license plate", "number plate"}
@@ -411,7 +417,7 @@ def vision_guessable(image_bytes: bytes, title: str, place: str) -> tuple[bool, 
         return True, "flag/billboard/sign"
     if has(TRANSPORT_LABELS):
         return True, "distinctive transport"
-    if has(SKYLINE_LABELS):
+    if has(SKYLINE_LABELS) and not has(AERIAL_LABELS):
         return True, "skyline"
     return False, "no guessability cue"
 
