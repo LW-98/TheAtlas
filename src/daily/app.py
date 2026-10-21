@@ -71,6 +71,10 @@ CANDIDATES_PER_CITY = 5                   # scene photos to vision-test per city
 
 COORDS_KEY = "city_coords.json"
 CURRENT_KEY = "puzzle/current.json"
+USED_KEY = "used_photos.json"
+# Remember this many recently-used photos so none repeats within roughly a year
+# and a bit (5 a day x ~500 days). Just a small JSON file in S3 - no extra cost.
+MAX_USED = 2500
 
 TITLE_DENYLIST = (
     "map", "plan ", "coat of arms", "logo", "flag", "stamp", "seal",
@@ -158,13 +162,12 @@ URBAN_LABELS = {"city", "urban", "street", "road", "building", "architecture",
 # building-type labels ("office building", "parliament", "monastery", ...):
 # Rekognition misfires on those (it called a Breslau postcard "Parliament" and a
 # Turin backyard "Monastery"), which would re-admit the generic scenes we cut.
+# Still used to confirm a photo is a built scene, but NOT as a standalone
+# guessability cue: "Metropolis"/"High Rise" fire on background or generic
+# buildings (a hazy aerial sprawl, a park with towers behind, an old street),
+# producing unguessable passes. A photo must instead carry a readable/locating
+# cue (text, script, flag, transport).
 SKYLINE_LABELS = {"skyscraper", "high rise", "metropolis", "skyline", "tower block"}
-# A distant, overhead or scenic view. The skyline labels above also fire on a
-# hazy aerial sprawl with no eye-level landmark (a far hilltop panorama), which
-# isn't guessable - these labels are the tell, so they veto the skyline cue. A
-# genuine eye-level skyline (e.g. Dubai) carries none of them.
-AERIAL_LABELS = {"aerial view", "landscape", "scenery", "satellite imagery",
-                 "bird's-eye view", "panoramic"}
 # Visible man-made cues that locate a photo in space/time.
 CUE_LABELS = {"flag", "billboard", "poster", "advertisement", "banner",
               "sign", "signage", "neon", "license plate", "number plate"}
@@ -309,9 +312,10 @@ def _is_scene(cats: list) -> bool:
     return any(hint in blob for hint in SCENE_CATEGORY_HINTS)
 
 
-def scene_candidates(city: str):
+def scene_candidates(city: str, used: set):
     """Stage 1. Return (year, [candidate, ...]) - quality scene photos from a
-    '<year> in <city>' category for a random year, ready for the vision gate."""
+    '<year> in <city>' category for a random year, ready for the vision gate.
+    Photos whose source URL is in `used` (recently served) are skipped."""
     year = random.randint(YEAR_MIN, YEAR_MAX)
     members = category_files(f"{year} in {city}")
     titles = [m["title"] for m in members
@@ -329,6 +333,9 @@ def scene_candidates(city: str):
         if not _is_scene(entry["cats"]):
             continue
         ii = entry["ii"]
+        src = ii.get("descriptionurl", "")
+        if src and src in used:
+            continue  # already served recently - don't repeat
         meta = ii.get("extmetadata") or {}
         out.append({
             "thumb_url": ii["thumburl"],
@@ -337,7 +344,7 @@ def scene_candidates(city: str):
             "author": _clean((meta.get("Artist") or {}).get("value", "")) or "Unknown",
             "license": _clean((meta.get("LicenseShortName") or {}).get("value", "")) or "See source",
             "licenseUrl": (meta.get("LicenseUrl") or {}).get("value", ""),
-            "sourceUrl": ii.get("descriptionurl", ""),
+            "sourceUrl": src,
         })
         if len(out) >= CANDIDATES_PER_CITY:
             break
@@ -372,9 +379,10 @@ def vision_guessable(image_bytes: bytes, title: str, place: str) -> tuple[bool, 
     postcard (whose printed caption restates the file's own title - the tell
     that it's a postcard, whereas an incidental sign or shirt won't match the
     title). It then needs a locating cue: readable signage, a non-Latin writing
-    system, a flag/billboard, distinctive transport, or a skyline. Returns
-    (ok, reason). Fails open on a Rekognition error so a transient fault can't
-    stall the whole build."""
+    system, a flag/billboard, or distinctive transport. (A bare skyline is not a
+    cue - those labels fire on generic/background buildings and produced
+    unguessable passes.) Returns (ok, reason). Fails open on a Rekognition error
+    so a transient fault can't stall the whole build."""
     try:
         labels_resp = rekognition.detect_labels(
             Image={"Bytes": image_bytes}, MaxLabels=20, MinConfidence=70)
@@ -417,8 +425,6 @@ def vision_guessable(image_bytes: bytes, title: str, place: str) -> tuple[bool, 
         return True, "flag/billboard/sign"
     if has(TRANSPORT_LABELS):
         return True, "distinctive transport"
-    if has(SKYLINE_LABELS) and not has(AERIAL_LABELS):
-        return True, "skyline"
     return False, "no guessability cue"
 
 
@@ -436,6 +442,26 @@ def save_coords_cache(cache: dict) -> None:
     s3.put_object(
         Bucket=PUZZLE_BUCKET, Key=COORDS_KEY,
         Body=json.dumps(cache, ensure_ascii=False).encode("utf-8"),
+        ContentType="application/json",
+    )
+
+
+# --- Recently-used photos (so none repeats within ~a year) -------------------
+
+def load_used() -> list:
+    """The source URLs of recently-used photos, oldest first. A tiny S3 file."""
+    try:
+        obj = s3.get_object(Bucket=PUZZLE_BUCKET, Key=USED_KEY)
+        data = json.loads(obj["Body"].read().decode())
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_used(items: list) -> None:
+    s3.put_object(
+        Bucket=PUZZLE_BUCKET, Key=USED_KEY,
+        Body=json.dumps(items[-MAX_USED:], ensure_ascii=False).encode("utf-8"),
         ContentType="application/json",
     )
 
@@ -500,6 +526,8 @@ def store_image(data: bytes, content_type: str, key: str) -> str:
 def handler(event, context):
     date_str = datetime.now(timezone.utc).date().isoformat()
     coords_cache = load_coords_cache()
+    recent_used = load_used()      # source URLs served recently (oldest first)
+    used = set(recent_used)
 
     rounds = []
     used_cities: set = set()
@@ -517,7 +545,7 @@ def handler(event, context):
             continue
 
         try:
-            year, candidates = scene_candidates(city)
+            year, candidates = scene_candidates(city, used)
         except Exception as e:  # noqa: BLE001
             print(f"  scene_candidates error for {city!r}: {e}")
             continue
@@ -569,6 +597,9 @@ def handler(event, context):
         })
         used_cities.add(city)
         used_years.add(year)
+        if cand["sourceUrl"]:
+            used.add(cand["sourceUrl"])
+            recent_used.append(cand["sourceUrl"])
         print(f"  round {len(rounds)}: {city} {year}")
 
     save_coords_cache(coords_cache)
@@ -579,6 +610,8 @@ def handler(event, context):
         print(msg)
         if not rounds:
             return {"statusCode": 500, "body": "No photos found; keeping existing puzzle"}
+
+    save_used(recent_used)
 
     puzzle = {
         "puzzleId": date_str,
